@@ -1,0 +1,262 @@
+{
+  "_comment": "Job ingestion config for fetch_jobs.py. Credentials never go here: JOOBLE_API_KEY and APIFY_TOKEN come from the environment. Every board below was checked live; all are disabled until you set enabled to true.",
+  "companies": [
+    {
+      "name": "GitLab",
+      "enabled": false,
+      "greenhouse_board_token": "gitlab",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Example of a verified public Greenhouse board (boards-api.greenhouse.io/v1/boards/gitlab/jobs returned 200). Set enabled to true to fetch it."
+    },
+    {
+      "name": "Ashby",
+      "enabled": false,
+      "greenhouse_board_token": null,
+      "ashby_board_name": "ashby",
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Example of a verified public Ashby board (api.ashbyhq.com/posting-api/job-board/ashby returned 200). Set enabled to true to fetch it."
+    },
+    {
+      "name": "Stripe",
+      "enabled": true,
+      "greenhouse_board_token": "stripe",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 712 jobs, 43 in Toronto; 6 non-senior backend roles in Toronto (e.g. Backend / API Engineer, Radar)."
+    },
+    {
+      "name": "Cohere",
+      "enabled": true,
+      "greenhouse_board_token": null,
+      "ashby_board_name": "cohere",
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Ashby board, checked 2026-10-27: 116 jobs, 56 in Toronto; 10 infra/platform roles in Canada incl. Site Reliability Engineer, Inference Infrastructure (Toronto)."
+    },
+    {
+      "name": "Affirm",
+      "enabled": true,
+      "greenhouse_board_token": "affirm",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 240 jobs; 28 backend/platform roles posted as Remote Canada, 8 non-senior (Software Engineer II, Backend). No Toronto-office postings."
+    },
+    {
+      "name": "Robinhood",
+      "enabled": true,
+      "greenhouse_board_token": "robinhood",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 156 jobs, 17 in Toronto; non-senior Toronto roles incl. Software Developer, Ops Platform."
+    },
+    {
+      "name": "Faire",
+      "enabled": true,
+      "greenhouse_board_token": "faire",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 68 jobs, 13 in Toronto; 2 non-senior platform/backend roles (Toronto, Kitchener-Waterloo)."
+    },
+    {
+      "name": "Lyft",
+      "enabled": true,
+      "greenhouse_board_token": "lyft",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 179 jobs, 49 in Toronto; current matches are Summer 2027 backend internships (Toronto, Montreal)."
+    },
+    {
+      "name": "Tailscale",
+      "enabled": true,
+      "greenhouse_board_token": "tailscale",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 53 jobs; Infrastructure Engineer and Security Infrastructure Engineer posted as Remote (Canada), not senior-titled."
+    },
+    {
+      "name": "Samsara",
+      "enabled": true,
+      "greenhouse_board_token": "samsara",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 323 jobs, 3 in Toronto; Software Engineer - Data Platform posted as Remote - Canada."
+    },
+    {
+      "name": "1Password",
+      "enabled": true,
+      "greenhouse_board_token": null,
+      "ashby_board_name": "1password",
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Ashby board, checked 2026-10-27: 87 jobs, 5 in Toronto; current match is a Winter 2027 platform internship (Remote US/Canada)."
+    },
+    {
+      "name": "Okta",
+      "enabled": true,
+      "greenhouse_board_token": "okta",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 392 jobs, 79 in Toronto; 12 platform/infra roles in Toronto, all currently senior or principal."
+    },
+    {
+      "name": "MongoDB",
+      "enabled": true,
+      "greenhouse_board_token": "mongodb",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 364 jobs, 13 in Toronto; SRE role in Toronto/Montreal is senior or staff."
+    },
+    {
+      "name": "Ramp",
+      "enabled": true,
+      "greenhouse_board_token": null,
+      "ashby_board_name": "ramp",
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Ashby board, checked 2026-10-27: 172 jobs, 12 in Toronto; backend roles open to Remote (Canada) are senior."
+    },
+    {
+      "name": "Fivetran",
+      "enabled": true,
+      "greenhouse_board_token": "fivetran",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 173 jobs, 6 in Toronto; Toronto backend role is staff level."
+    },
+    {
+      "name": "Trulioo",
+      "enabled": true,
+      "greenhouse_board_token": null,
+      "ashby_board_name": "trulioo",
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Ashby board, checked 2026-10-27: 27 jobs, 6 in Toronto; backend role (Vancouver/Toronto) is senior."
+    },
+    {
+      "name": "Grafana Labs",
+      "enabled": true,
+      "greenhouse_board_token": "grafanalabs",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 133 jobs; 6 backend/observability roles posted as Canada (Remote), all senior."
+    },
+    {
+      "name": "Elastic",
+      "enabled": true,
+      "greenhouse_board_token": "elastic",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 404 jobs, 2 in Toronto; SRE role posted for Canada is senior."
+    },
+    {
+      "name": "Coinbase",
+      "enabled": true,
+      "greenhouse_board_token": "coinbase",
+      "ashby_board_name": null,
+      "include_keywords": [],
+      "exclude_keywords": [],
+      "notes": "Verified public Greenhouse board, checked 2026-10-27: 225 jobs; backend roles posted as Remote - Canada, all senior."
+    }
+  ],
+  "filters": {
+    "title_keywords": [],
+    "exclude_title_keywords": [],
+    "locations": [
+      "Toronto",
+      "Canada",
+      "United States"
+    ],
+    "max_age_days": 120,
+    "include_unspecified_remote": true
+  },
+  "http": {
+    "timeout_seconds": 20,
+    "max_retries": 2,
+    "backoff_seconds": 1.0,
+    "cache_ttl_seconds": 3600
+  },
+  "sources": {
+    "greenhouse": {
+      "enabled": true,
+      "timeout_seconds": 20,
+      "max_requests_per_run": 50
+    },
+    "ashby": {
+      "enabled": true,
+      "timeout_seconds": 20,
+      "max_requests_per_run": 50
+    },
+    "simplify": {
+      "enabled": true,
+      "timeout_seconds": 60,
+      "max_requests_per_run": 4,
+      "max_age_days": 120,
+      "write_metadata_only": true,
+      "max_response_mb": 40,
+      "repositories": [
+        {
+          "name": "New-Grad-Positions",
+          "url": "https://github.com/SimplifyJobs/New-Grad-Positions",
+          "branch": "dev",
+          "listings_path": ".github/scripts/listings.json",
+          "enabled": true,
+          "category": "new_grad"
+        },
+        {
+          "name": "Summer2027-Internships",
+          "url": "https://github.com/SimplifyJobs/Summer2027-Internships",
+          "branch": "dev",
+          "listings_path": ".github/scripts/listings.json",
+          "enabled": false,
+          "category": "internship",
+          "include_past_terms": false,
+          "notes": "Formerly Summer2026-Internships (GitHub redirects the old name). Opt-in only; terms that have already started are excluded unless include_past_terms is true."
+        }
+      ]
+    },
+    "jooble": {
+      "enabled": true,
+      "timeout_seconds": 20,
+      "api_host": "jooble.org",
+      "keywords": [
+        "DevOps Engineer",
+        "Platform Engineer",
+        "Site Reliability Engineer",
+        "Infrastructure Engineer",
+        "Backend Engineer"
+      ],
+      "locations": [
+        "Toronto",
+        "Canada",
+        "Remote"
+      ],
+      "max_requests_per_run": 10,
+      "results_per_page": 20,
+      "pages_per_search": 1
+    },
+    "jobright": {
+      "enabled": true,
+      "timeout_seconds": 290,
+      "default_keyword": "Software Engineer",
+      "default_location": "Toronto, Canada",
+      "default_country": "CA",
+      "default_limit": 25,
+      "max_total_charge_usd": 0.5
+    }
+  }
+}

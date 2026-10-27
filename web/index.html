@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Board</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="ambient" aria-hidden="true"></div>
+<div class="wrap">
+  <header class="top reveal">
+    <p class="eyebrow">jobauto &middot; job board</p>
+    <h1>Every open role, scored against your experience.</h1>
+    <p class="lede">Browse all roles and levels across the US and Canada. Upload your resume
+      or master profile and each job gets an evidence-based fit score.</p>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" id="tab-jobs" aria-controls="panel-jobs" aria-selected="true">Jobs</button>
+      <button class="tab" role="tab" id="tab-resume" aria-controls="panel-resume" aria-selected="false">Your resume</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="panel-jobs" role="tabpanel" aria-labelledby="tab-jobs">
+      <div class="banner reveal" id="profile-banner">
+        <p id="banner-text">Upload your resume to see how you fit each job.</p>
+        <button class="btn" type="button" data-goto="resume" id="banner-action">Upload resume</button>
+      </div>
+
+      <div class="bento">
+        <div class="card span-2 reveal"><p class="stat-big" id="stat-jobs">&mdash;</p>
+          <p class="stat-label" id="stat-jobs-label">Jobs on the board</p></div>
+        <div class="card span-2 reveal"><p class="stat-big" id="stat-scorable">&mdash;</p>
+          <p class="stat-label" id="stat-scorable-label">With enough detail to score</p></div>
+        <div class="card span-2 reveal"><p class="stat-big" id="stat-fit">&mdash;</p>
+          <p class="stat-label" id="stat-fit-label">At or above the fit threshold</p></div>
+        <div class="card span-3 reveal"><h2>Regions</h2>
+          <div class="split"><div><p class="stat-big" id="stat-us">&mdash;</p><p class="stat-label">US</p></div>
+          <div><p class="stat-big" id="stat-ca">&mdash;</p><p class="stat-label">Canada</p></div></div></div>
+        <div class="card span-3 reveal"><h2>Levels</h2><ul class="levels" id="stat-levels"></ul></div>
+      </div>
+
+      <div class="list-head reveal">
+        <h2>All jobs</h2>
+        <span class="count" id="count" aria-live="polite"></span>
+      </div>
+      <div class="controls reveal">
+        <input class="search" id="search" type="search" placeholder="Title, company or city"
+          aria-label="Filter jobs">
+        <label class="select"><span>Sort</span>
+          <select id="sort">
+            <option value="best">Best match</option>
+            <option value="score">Fit score</option>
+            <option value="newest">Newest</option>
+            <option value="company">Company</option>
+          </select></label>
+        <label class="select"><span>Status</span>
+          <select id="status">
+            <option value="all">All</option>
+            <option value="proceed">At or above threshold</option>
+            <option value="scored">Scored</option>
+            <option value="thin">Not enough detail</option>
+            <option value="listing">Listing only</option>
+          </select></label>
+        <label class="select"><span>Region</span>
+          <select id="region">
+            <option value="all">Anywhere</option>
+            <option value="US">US</option>
+            <option value="Canada">Canada</option>
+          </select></label>
+      </div>
+      <div class="level-row reveal" role="group" aria-label="Filter by level">
+        <span class="level-label">Level</span>
+        <div class="level-chips" id="level-chips"></div>
+        <button class="level-clear" type="button" id="level-clear" hidden>Clear</button>
+      </div>
+      <div class="jobs" id="jobs"></div>
+      <div class="more"><button class="btn btn-quiet" type="button" id="more">Show more</button></div>
+    </section>
+
+    <section id="panel-resume" role="tabpanel" aria-labelledby="tab-resume" hidden>
+      <div class="resume-grid">
+        <div class="card reveal">
+          <h2>Upload</h2>
+          <label class="drop" id="drop">
+            <input type="file" id="file" accept=".md,.txt,.pdf">
+            <span class="drop-title">Drop a file here or choose one</span>
+            <span class="drop-sub">Master profile (.md), plain resume (.md or .txt), or PDF. Up to 2 MB.</span>
+          </label>
+          <p class="or">or paste the text</p>
+          <textarea id="paste" rows="7" placeholder="Paste your resume text here"></textarea>
+          <div class="row">
+            <button class="btn" type="button" id="score-paste">Score pasted text</button>
+            <label class="check"><input type="checkbox" id="remember" checked> Remember on this device</label>
+          </div>
+          <p class="status" id="upload-status" role="status"></p>
+        </div>
+
+        <div class="card reveal" id="profile-card" hidden>
+          <div class="profile-head">
+            <h2>Your profile</h2>
+            <span class="tag" id="profile-mode"></span>
+          </div>
+          <p class="profile-file" id="profile-file"></p>
+          <p class="stat-label" id="profile-evidence"></p>
+          <p class="notice" id="profile-warning" hidden></p>
+          <h4>Skills with evidence</h4>
+          <div class="chips" id="profile-skills"></div>
+          <div id="profile-no-wrap" hidden><h4>Marked [NO]</h4><div class="chips" id="profile-no"></div></div>
+          <div class="row">
+            <button class="btn" type="button" data-goto="jobs">See your matches</button>
+            <button class="btn btn-quiet" type="button" id="forget">Forget my resume</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq reveal">
+        <h2>How it works</h2>
+        <details><summary>What the fit score means</summary>
+          <p>Each job's requirements are read from its description and weighted 3 for
+          must-haves, 2 for required and 1 for nice-to-haves. The score is the share of that
+          weight your profile backs with evidence. It measures coverage of what the posting
+          asks for, not your chance of being hired.</p></details>
+        <details><summary>Master profile versus plain resume</summary>
+          <p>A master profile tags each line as verified or [NO], so skills you have ruled
+          out never count. A plain resume has no tags: every line counts as your own claim,
+          which makes the score less strict. The profile card shows which mode was used.</p></details>
+        <details><summary>Why some jobs say "not enough detail to score"</summary>
+          <p>A score needs at least three skill requirements the parser recognizes. Many
+          sales, finance and operations postings name only a degree or terms outside the
+          skill vocabulary, and a score built on one match would be misleading, so those
+          jobs are listed without one.</p></details>
+        <details><summary>Why "Best match" can differ from the score</summary>
+          <p>Some postings yield only one or two recognizable requirements, so a 100 can rest
+          on very little. Best match discounts scores built on few requirements; the score
+          itself is shown unchanged on every job.</p></details>
+        <details><summary>Where your resume goes</summary>
+          <p>It is sent to this app's server on your own computer, parsed in memory for a
+          single request, and never saved there. With "Remember on this device" checked, a
+          copy stays in this browser's local storage so the board can re-score after a
+          reload. "Forget my resume" removes it.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <footer><span id="footer-index">Loading the board</span>
+    <span>Refresh jobs: python3 fetch_jobs.py, then restart python3 app.py</span></footer>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

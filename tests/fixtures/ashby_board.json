@@ -1,0 +1,63 @@
+{
+ "apiVersion": "1",
+ "jobs": [
+  {
+   "id": "11111111-2222-4333-8444-555555555555",
+   "title": "Platform Engineer",
+   "department": "Engineering",
+   "team": "Infrastructure",
+   "employmentType": "FullTime",
+   "location": "Toronto",
+   "secondaryLocations": [
+    {
+     "location": "Montreal",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "Canada"
+      }
+     }
+    }
+   ],
+   "publishedAt": "2026-10-10T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "address": {
+    "postalAddress": {
+     "addressCountry": "Canada"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/sampleco/11111111-2222-4333-8444-555555555555",
+   "applyUrl": "https://jobs.ashbyhq.com/sampleco/11111111-2222-4333-8444-555555555555/application",
+   "descriptionHtml": "<p><strong>About the role</strong></p><p>Own our platform.</p><h3>Qualifications</h3><ol><li>Linux</li><li>Ansible</li></ol>",
+   "descriptionPlain": "About the role\nOwn our platform.",
+   "shouldDisplayCompensationOnJobPostings": false
+  },
+  {
+   "id": "66666666-7777-4888-9999-000000000000",
+   "title": "Site Reliability Engineer",
+   "department": "Engineering",
+   "team": null,
+   "employmentType": "Contract",
+   "location": "Remote - Canada",
+   "secondaryLocations": [],
+   "publishedAt": "2026-10-11T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": null,
+   "jobUrl": "https://jobs.ashbyhq.com/sampleco/66666666-7777-4888-9999-000000000000",
+   "applyUrl": null,
+   "descriptionHtml": "",
+   "descriptionPlain": "Keep services up.\n\n\nBe on call."
+  },
+  {
+   "id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+   "title": "Backend Engineer",
+   "location": "Toronto",
+   "isListed": false,
+   "workplaceType": "OnSite",
+   "jobUrl": "https://jobs.ashbyhq.com/sampleco/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+   "descriptionHtml": "<p>Hidden</p>"
+  }
+ ]
+}

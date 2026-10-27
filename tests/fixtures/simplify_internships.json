@@ -1,0 +1,71 @@
+[
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "active": true,
+  "is_visible": true,
+  "company_url": "https://simplify.jobs/c/Example",
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ],
+  "id": "i1",
+  "company_name": "Intern Co",
+  "title": "Backend Intern",
+  "terms": [
+   "Summer 2026"
+  ],
+  "url": "https://intern.example/1",
+  "locations": [
+   "Toronto, ON"
+  ],
+  "date_posted": 1791331200,
+  "date_updated": 1792972800
+ },
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "active": true,
+  "is_visible": true,
+  "company_url": "https://simplify.jobs/c/Example",
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ],
+  "id": "i2",
+  "company_name": "Intern Co",
+  "title": "Platform Intern",
+  "terms": [
+   "Summer 2027"
+  ],
+  "url": "https://intern.example/2",
+  "locations": [
+   "Toronto, ON"
+  ],
+  "date_posted": 1792886400,
+  "date_updated": 1792972800
+ },
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "active": true,
+  "is_visible": true,
+  "company_url": "https://simplify.jobs/c/Example",
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ],
+  "id": "i3",
+  "company_name": "Intern Co",
+  "title": "DevOps Intern",
+  "terms": [
+   "N/A"
+  ],
+  "url": "https://intern.example/3",
+  "locations": [
+   "Remote in Canada"
+  ],
+  "date_posted": 1792886400,
+  "date_updated": 1792972800
+ }
+]

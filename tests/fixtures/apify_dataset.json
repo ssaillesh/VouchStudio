@@ -1,0 +1,47 @@
+[
+ {
+  "jobTitle": "Site Reliability Engineer",
+  "companyName": {
+   "name": "Nested Co",
+   "description": "We are a company that does many things."
+  },
+  "location": [
+   "Toronto, ON",
+   "Remote"
+  ],
+  "salary": "$120,000/yr",
+  "jobType": "Full-time",
+  "experienceLevel": "entry",
+  "postedDate": "2026-10-22",
+  "applyUrl": "https://nested.example/jobs/5/apply",
+  "companyUrl": "https://nested.example",
+  "description": "<p>We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. </p>",
+  "requirements": [
+   "3+ years with Linux",
+   "Prometheus"
+  ],
+  "benefits": [
+   "Dental"
+  ],
+  "sourcePortal": "jobright",
+  "country": "CA",
+  "scrapedAt": "2026-10-26T00:00:00Z"
+ },
+ {
+  "jobTitle": "Backend Engineer",
+  "companyName": "Short Co",
+  "location": "Toronto",
+  "applyUrl": "https://short.example/jobs/6",
+  "companyUrl": "https://short.example",
+  "description": "Brief summary.",
+  "requirements": [],
+  "postedDate": null
+ },
+ {
+  "jobTitle": "DevOps Engineer",
+  "companyName": "Extra Co",
+  "location": "Toronto",
+  "applyUrl": "https://extra.example/jobs/7",
+  "description": "<p>We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. We run reliable infrastructure for payments with Python and Docker. </p>"
+ }
+]

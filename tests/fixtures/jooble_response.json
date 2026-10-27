@@ -1,0 +1,41 @@
+{
+ "totalCount": 3,
+ "jobs": [
+  {
+   "id": -1234567890123,
+   "title": "Platform Engineer",
+   "location": "Toronto, ON",
+   "snippet": "&nbsp;...run <b>Kubernetes</b> and Python services...&nbsp;",
+   "salary": "$90k - $110k",
+   "source": "examplejobs.ca",
+   "type": "Full-time",
+   "link": "https://jooble.org/desc/-1234567890123?ckey=platform",
+   "company": "Sample Co",
+   "updated": "2026-10-20T00:00:00.0000000"
+  },
+  {
+   "id": 222,
+   "title": "Platform Engineer",
+   "location": "Toronto",
+   "snippet": "Own our platform.",
+   "salary": "",
+   "source": "x",
+   "type": "",
+   "link": "https://jooble.org/desc/222",
+   "company": "SampleCo",
+   "updated": "2026-10-21T00:00:00.0000000"
+  },
+  {
+   "id": 333,
+   "title": "Barista",
+   "location": "Toronto",
+   "snippet": "Coffee.",
+   "salary": "",
+   "source": "x",
+   "type": "",
+   "link": "https://jooble.org/desc/333",
+   "company": "Cafe",
+   "updated": "2026-10-21T00:00:00.0000000"
+  }
+ ]
+}
