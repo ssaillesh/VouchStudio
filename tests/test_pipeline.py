@@ -41,9 +41,12 @@ class WorkspaceCase(unittest.TestCase):
                 return req
         self.fail(f"requirement {name!r} not extracted: {[r.name for r in analysis.requirements]}")
 
+    cli_flags: tuple[str, ...] = ("--no-kit",)  # the synthetic master has no resume kit
+
     def run_cli(self, *args, runner=None, which=None):
         lines: list[str] = []
-        code = P.run([*args, "--workspace", str(self.root), "--output-dir", str(self.outputs)],
+        code = P.run([*args, *self.cli_flags, "--workspace", str(self.root), "--output-dir",
+                      str(self.outputs)],
                      which=which or fake_which(), runner=runner or FakeTex(), out=lines.append)
         return code, lines
 
@@ -108,7 +111,8 @@ class InputTests(WorkspaceCase):
         (self.root / "template.tex").unlink()
         code, lines = self.run_cli(str(self.root / "target_jobs" / "proceed.md"))
         self.assertEqual(code, P.EXIT_MISSING_PREREQ)
-        self.assertIn("never invents a template", lines[0])
+        self.assertTrue(lines[0].startswith("Master profile: "), lines[0])
+        self.assertIn("never invents a template", lines[1])
 
     def test_ambiguous_template_structure_refused(self):
         bad = TEMPLATE.replace("\\section{Education}", "\\section{Education}\nSome loose text")
@@ -519,7 +523,10 @@ class ResumeGenerationTests(WorkspaceCase):
         self.assertEqual(code, P.EXIT_LOW_FIT)
         self.assertEqual(sorted(p.name for p in self.outputs.iterdir()),
                          ["other-co_data-scientist_analysis.json",
-                          "other-co_data-scientist_gap_analysis.json"])
+                          "other-co_data-scientist_fit_report.md",
+                          "other-co_data-scientist_gap_analysis.json",
+                          "other-co_data-scientist_job.json",
+                          "other-co_data-scientist_requirements.json"])
         report = json.loads((self.outputs / "other-co_data-scientist_analysis.json").read_text())
         self.assertEqual(report["resume"]["status"], "skipped_low_fit")
         self.assertEqual(report["gap_analysis"], "other-co_data-scientist_gap_analysis.json")
@@ -540,6 +547,9 @@ class ResumeGenerationTests(WorkspaceCase):
         self.assertEqual(names, ["example-co_platform-engineer_analysis.json",
                                  "example-co_platform-engineer_briefing.json",
                                  "example-co_platform-engineer_briefing.md",
+                                 "example-co_platform-engineer_fit_report.md",
+                                 "example-co_platform-engineer_job.json",
+                                 "example-co_platform-engineer_requirements.json",
                                  "example-co_platform-engineer_resume.log",
                                  "example-co_platform-engineer_resume.pdf",
                                  "example-co_platform-engineer_resume.tex"])
@@ -604,7 +614,7 @@ class CompileAndFitTests(WorkspaceCase):
         code, lines = self.run_cli(str(self.root / "target_jobs" / "proceed.md"),
                                    which=fake_which(("pdflatex", "pdfinfo")))
         self.assertEqual(code, P.EXIT_MISSING_PREREQ)
-        self.assertIn("pdftotext", lines[0])
+        self.assertIn("pdftotext", lines[-1])
 
     def test_compile_command_is_safe(self):
         fake = FakeTex()
@@ -673,18 +683,26 @@ class CompileAndFitTests(WorkspaceCase):
         self.assertEqual((result.iterations, result.spacing_level, result.removed), (1, 0, []))
 
     def test_multi_page_triggers_deterministic_trimming(self):
-        start = bullets_in(P.render_resume(self.plan_obj, set(), 0))
-        units = P.trim_sequence(self.plan_obj)
+        # The roomy plan has bullets above the 3-bullet floor, so trimming has work to do.
+        template, plan = self.roomy_plan()
+        start = bullets_in(P.render_resume(plan, set(), 0))
+        units = P.trim_sequence(plan)
         self.assertGreaterEqual(len(units), 1)
         target = start - 1
-        first = self.fit(FakeTex(lambda tex: 1 if bullets_in(tex) <= target else 2))
-        second = self.fit(FakeTex(lambda tex: 1 if bullets_in(tex) <= target else 2))
+        tools = P.detect_tools(template, fake_which())
+
+        def fit(fake):
+            return P.fit_to_one_page(plan, tools, self.outputs / ".build" / "m", "m_resume",
+                                     self.root, fake)
+
+        first = fit(FakeTex(lambda tex: 1 if bullets_in(tex) <= target else 2))
+        second = fit(FakeTex(lambda tex: 1 if bullets_in(tex) <= target else 2))
         self.assertTrue(first.ok)
         self.assertEqual(first.removed, second.removed)
         self.assertEqual(first.tex, second.tex)
         self.assertLessEqual(bullets_in(first.tex), target)
-        expected = [P._describe_unit(self.plan_obj, u)
-                    for u, _w in P.trim_sequence(self.plan_obj)][:len(first.removed)]
+        expected = [P._describe_unit(plan, u)
+                    for u, _w in P.trim_sequence(plan)][:len(first.removed)]
         self.assertEqual([r["unit"] for r in first.removed], expected)
         self.assertEqual(first.spacing_level, 0)
 
@@ -881,8 +899,8 @@ class RealWorkspaceTests(unittest.TestCase):
                 if why.startswith("optional entry with no"):
                     continue
                 ep = plan.entries[(unit[1], unit[2])]
-                values.append(max(c.relevance for c in ep.selected) if unit[0] == "entry"
-                              else next(c.relevance for c in ep.selected
+                values.append(max(c.worth() for c in ep.selected) if unit[0] == "entry"
+                              else next(c.worth() for c in ep.selected
                                         if c.bullet_index == unit[3]))
             self.assertEqual(values, sorted(values))  # weakest content always goes first
 
@@ -897,7 +915,7 @@ HAVE_TEX = bool(shutil.which("pdflatex") and shutil.which("pdftotext"))
 class RealCompileTests(WorkspaceCase):
     def test_end_to_end_single_page_with_synthetic_template(self):
         lines: list[str] = []
-        code = P.run([str(self.root / "target_jobs" / "proceed.md"), "--workspace",
+        code = P.run([str(self.root / "target_jobs" / "proceed.md"), "--no-kit", "--workspace",
                       str(self.root), "--output-dir", str(self.outputs)], out=lines.append)
         self.assertEqual(code, P.EXIT_OK, "\n".join(lines))
         pdf = self.outputs / "example-co_platform-engineer_resume.pdf"

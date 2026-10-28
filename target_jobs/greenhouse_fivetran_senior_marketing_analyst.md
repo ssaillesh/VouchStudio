@@ -61,7 +61,7 @@ This is a full-time, flexible hybrid position based in Oakland, CA. Our hybrid w
 - Passion for using data to improve marketing effectiveness and inform go-to-market decisions.
 - Experience using analytics to support key business decisions, preferably at a high-growth, SaaS, or B2B product company
 
-#### Bonus Skills​
+#### Bonus Skills
 
 - Experience in Marketing Analytics, demand generation analytics, growth analytics, marketing operations, or another marketing-related analytical function.
 - Familiarity with CRM, marketing automation, attribution, web analytics, or product analytics systems such as Salesforce, Marketo, GA4, or Bizible.

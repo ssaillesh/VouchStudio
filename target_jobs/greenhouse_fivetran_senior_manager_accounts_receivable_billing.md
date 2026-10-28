@@ -59,7 +59,7 @@ NetSuite, Salesforce, billing and payment platforms, SQL, Excel, Google Sheets, 
 - Experience leading significant transformation initiatives such as finance-system implementations, process migrations, M&A integration, shared-services transitions, or operating-model redesign.
 - Demonstrated ability to use AI, automation, workflow tools, RPA, APIs, or related technologies to reduce manual work while creating appropriate monitoring, documentation, and human-review controls.
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Experience integrating billing or finance operations following a merger or acquisition.
 - Experience establishing or expanding an India-based Finance Center of Excellence.

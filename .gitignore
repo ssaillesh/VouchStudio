@@ -2,3 +2,8 @@
 /CLAUDE.md
 /master_profile.md
 /template.tex
+/.venv/
+/.studio/
+/tests/fixtures/regression/*.pdf
+/tests/fixtures/regression/*.tex
+/tests/fixtures/bad_outputs/*.pdf

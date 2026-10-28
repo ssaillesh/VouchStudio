@@ -1,0 +1,5 @@
+# Vouch Studio (server.py) only. The engine (pipeline.py, fetch_jobs.py, jobboard.py)
+# stays on the Python standard library. Installed into .venv by ./run_ui.sh.
+fastapi==0.162.0
+uvicorn==0.54.0
+httpx==0.28.1  # fastapi.testclient, used by tests/test_server.py

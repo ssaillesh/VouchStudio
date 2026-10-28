@@ -54,7 +54,7 @@ This is a full-time position based out of our Oakland, CA office. Our hybrid wor
 - Understand how to use AI code assist and coding agents to automatically generate code for features, bugs, testing, and investigation.
 - Ability to use conversational AI systems (like Claude, ChatGPT, and internal chatbots) to support researching, authoring, reviewing, and synthesizing various SDLC artifacts.
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Hands-on experience working with any cloud technologies (AWS, GCP, Azure) and containerization methodologies like Docker, K8s.
 - Experience in data processing (ETL, ELT) and/or cloud-based platforms.

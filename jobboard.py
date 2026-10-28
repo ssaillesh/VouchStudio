@@ -35,7 +35,8 @@ import dashboard
 import fetch_jobs
 import pipeline
 
-INDEX_VERSION = 3  # 2: either-or groups, pay text, company name; 3: group overlap
+INDEX_VERSION = 5  # 2: either-or groups, pay text, company name; 3: group overlap;
+                   # 4: link targets, "excel" verb, "good fit" headings; 5: "what we look for"
 INDEX_NAME = "job_index.json"
 MAX_UPLOAD_BYTES = 2_000_000
 PROFILE_EXTENSIONS = (".md", ".txt", ".pdf")

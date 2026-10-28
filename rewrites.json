@@ -1,0 +1,41 @@
+{
+  "_comment": "Truthful wording rules for template bullets, read by pipeline.py. 'when' rules move a verified bullet into a job's vocabulary when the job asks for one of those concepts; 'repair' rules restate a rejected template bullet in the master profile's own words. Every result is verified against the master profile again and must fit on one line (no longer than the template's longest bullet), so a rule can never add a fact.",
+  "rewrites": [
+    {
+      "find": "Cut CI failures 40% by turning recurring runner faults into Python and Ansible auto-remediation",
+      "replace": "Improved CI stability, cutting failures 40% with Python and Ansible auto-remediation of runner faults",
+      "when": ["reliability", "test_automation"],
+      "note": "test stability vocabulary"
+    },
+    {
+      "find": "Debugged failing pipelines from error code to root cause, fixing YAML and Java faults and routing complex code issues to developers",
+      "replace": "Triaged failing pipelines for teams from error code to root cause, fixing YAML and Java faults and routing code issues to developers",
+      "when": ["debugging"],
+      "note": "triage vocabulary"
+    },
+    {
+      "find": "Embedded code with MiniLM",
+      "replace": "Generated MiniLM embeddings of code into FAISS",
+      "when": ["embeddings"],
+      "note": "keyword scanners match 'embeddings', not 'embedded'"
+    },
+    {
+      "find": "Pull 50+ venues from Google Places, Yelp, and Foursquare plus live Ticketmaster events, with a mode for what's on right now",
+      "replace": "Pull 50+ venues from Google Places, Yelp, and Foursquare plus live Ticketmaster events; a right now mode suggests what's near the user",
+      "when": ["recommendation"],
+      "note": "recommendations grounded in user context (master: a 'right now' mode suggests venues and events near the user)"
+    },
+    {
+      "find": "1,147 pytest tests",
+      "replace": "1,147 Python tests",
+      "repair": true,
+      "note": "the master records 1,147 Python and 168 frontend tests; pytest is not named for LapZero"
+    },
+    {
+      "find": "Built an offline eval harness of 17 tests that replays chats, checking bad or untrusted LLM output falls back safely; 128 pytest tests in all",
+      "replace": "Built an offline eval harness of 11 conversation and 6 router tests checking that bad or untrusted LLM output falls back safely",
+      "repair": true,
+      "note": "the master records 11 conversation tests and 6 router tests; '17' and pytest are not stated"
+    }
+  ]
+}

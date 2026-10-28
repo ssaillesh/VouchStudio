@@ -26,7 +26,6 @@ Fivetran helps organizations automate data movement across the systems, clouds, 
 
 As we bring our teams and technology together, we’re building on the strengths of both companies while continuing to deliver the products and experiences our customers know and trust. It’s an exciting time to join us: we’re creating a company with the scale, talent, and technology to help more organizations put their data to work with greater speed, confidence, and impact.
 
-​
 During this transition period, you may see references to both Fivetran and dbt Labs throughout our recruiting process as we integrate our teams, systems, and career sites.
 
 **About the Role**
@@ -77,7 +76,7 @@ Google Workspace(sheets)/Excel, Jira, Looker/Sigma/Hex, Notion, Salesforce and S
 
 • Highly organized and self-directed, able to manage multiple concurrent programs in a fast-paced environment.
 
-**Bonus Skills​**
+**Bonus Skills**
 
 -Experience in data processing (ETL, ELT) and/or cloud-based platforms
 

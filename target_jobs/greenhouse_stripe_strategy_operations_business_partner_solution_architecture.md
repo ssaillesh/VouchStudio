@@ -50,7 +50,7 @@ We're looking for someone who meets the minimum requirements to be considered fo
 
 - 8+ years of sales strategy and operations experience in a high-tech growth environment, or operational experience in investment banking, management consulting, private equity, venture capital, or business insights / analytics roles. Knowledge of sales data such as customer accounts, opportunities and revenue. 11+ years of total work experience.
 - Bachelor's Degree in a related field (e.g. Finance, Business, Engineering, Mathematics)
-- Strong business acumen and ​​distinctive problem solving and analysis skills. Ability to solve complex and diverse business problems (commercial, operational, organizational).
+- Strong business acumen and distinctive problem solving and analysis skills. Ability to solve complex and diverse business problems (commercial, operational, organizational).
 - Exceptional analytical skills and a structured approach to solving unique business problems
 - Advanced SQL and Excel skills to include experience financial modelling
 - Experience working with large data sets, especially in analyzing large imperfect data sets to solve problems and creating scalable reports and dashboards or ad-hoc analysis

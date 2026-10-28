@@ -58,7 +58,7 @@ This is a full-time hybrid position based out of our Oakland office. Our hybrid 
 - Hands-on experience working with any cloud technologies(AWS, GCP, Azure) and containerization methodologies like Docker, K8s
 - Experience interacting with continuous integration tools like Buidkite
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Knowledge of observability tools like New Relic/Grafana is a plus
 - Knowledge of AI tools and usage is a plus

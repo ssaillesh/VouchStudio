@@ -32,7 +32,7 @@ This is an ideal role for someone who wants to work as a high-impact individual 
 
 We have multiple openings across this team, and use a general interview process. As a candidate, you’ll have a chance to meet hiring managers and teammates across several pillars throughout the process. By the final stage, you’ll be routed to the most relevant role(s) based on business priorities in addition to your skillsets and interests. We make sure you have plenty of time to meet your manager and potential teammates at the end of the process. More on the four pillars of our business below:
 
-**Retailer Growth Pillar** focuses on growing Faire’s retailer base by acquiring, activating, and retaining more retailers, ultimately driving demand and deeper engagement with the marketplace.⁠
+**Retailer Growth Pillar** focuses on growing Faire’s retailer base by acquiring, activating, and retaining more retailers, ultimately driving demand and deeper engagement with the marketplace.
 
 **Brand Pillar** drives Faire’s supply side — acquiring new brands, building tooling to help them run their businesses, partnering with them to maximize their growth and success on Faire, and ensuring quality of the marketplace.
 

@@ -50,7 +50,7 @@ This is a full-time, hybrid position based out of our Oakland, CA, Denver, CO or
 - A strong desire to understand our users and how our product contributes to their success.
 - Experience using AI to plan studies, synthesize feedback, and work more efficiently.
 
-#### Bonus Skills​
+#### Bonus Skills
 
 - Experience in the data industry
 - Experience with various survey methods, analysis, visualizations and relevant data tools like SQL.

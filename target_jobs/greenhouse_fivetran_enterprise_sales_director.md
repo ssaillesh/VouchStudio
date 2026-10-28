@@ -46,7 +46,7 @@ We’re looking to hire a Sales Director to join the Revenue Team in Boston, MA.
 - A passion for being an inclusive teammate and involved member of the community
 - Experience with SQL or willingness to learn
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Prior experience in analytics, ETL, BI, and/or open-sourced software
 - Knowledge of or prior experience with dbt

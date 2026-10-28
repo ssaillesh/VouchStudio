@@ -58,7 +58,7 @@ SQL, dbt, cloud data warehouses and lakehouses including Snowflake, Databricks, 
 - Ability to establish credibility and build trusted relationships with stakeholders ranging from data practitioners to senior executives
 - Ability to operate effectively in a fast-paced, evolving environment while collaborating across Sales, Product, Engineering, and Customer teams
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Experience with dbt or analytics engineering
 - Experience with Snowflake, Databricks, BigQuery, or other modern cloud data platforms

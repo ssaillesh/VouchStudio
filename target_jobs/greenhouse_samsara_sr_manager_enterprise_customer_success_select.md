@@ -61,7 +61,7 @@ An ideal candidate will be located in either Eastern or Central time-zones, and 
 - Ability to think big while also executing with excellence.
 - Self-starter who takes initiative and thrives in a fast-paced, change-heavy environment.
 - Diplomacy, tact, and poise under pressure when working through customer issues.
-- Demonstrated ability to foster an inclusive team environment that values diverse perspectives​.
+- Demonstrated ability to foster an inclusive team environment that values diverse perspectives.
 - Bachelor's degree from a 4-year institution.
 
 **An ideal candidate also has:**

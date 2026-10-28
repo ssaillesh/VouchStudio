@@ -64,7 +64,7 @@ This is a full-time position based out of our Oakland office. Our hybrid work mo
 - Knowledge of observability tools like New Relic/Grafana is a plus
 - Knowledge of AI tools and usage is a plus
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Experience in data processing (ETL, ELT) and/or cloud-based platforms.
 

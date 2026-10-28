@@ -37,7 +37,7 @@ The Talent Acquisition Coordinator will be responsible for keeping our hiring pr
 
 This role is expected to leverage AI and emerging technologies to improve productivity, enhance decision-making, and continuously optimize how work is performed.
 
-This is a full-time, permanent position based out of our Vancouver office, working on a hybrid model (3 days per week in-office).
+This is a full-time permanent position based out of our Vancouver office, working on a hybrid model (3 days per week in-office).
 
 #### What You'll Be Doing
 

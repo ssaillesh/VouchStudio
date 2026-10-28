@@ -40,7 +40,7 @@ The ideal candidate is passionate about leadership and driving results and impro
 - 2+ year experience in a leadership position
 - Ability to build relationships with cross functional stakeholders and drive shared outcomes
 - Customer obsessed with a track record for going above and beyond for the customer
-- Ability to lead in a fast­-paced environment subject to rapid change and ambiguity
+- Ability to lead in a fast-paced environment subject to rapid change and ambiguity
 - Relevant technology, social media, and customer care experience.
 - Strong written and verbal communication skills.
 - Problem solving, Decision making, and Time management skills are a must.

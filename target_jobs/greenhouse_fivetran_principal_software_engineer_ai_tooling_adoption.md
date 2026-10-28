@@ -77,7 +77,7 @@ This is a full-time position based out of our Oakland office. Our hybrid work mo
 - Experience with CI/CD, DevOps practices, and modern software development workflows
 - Track record of evaluating and implementing new technologies at scale
 
-​**Leadership Experience**
+**Leadership Experience**
 
 - Proven ability to drive technical initiatives across large engineering organizations (500+ people)
 - Experience leading without authority and influencing senior technical leaders
@@ -93,7 +93,7 @@ This is a full-time position based out of our Oakland office. Our hybrid work mo
 - Data-driven approach to measuring and improving adoption metrics
 - Patience and empathy when working with skeptics and late adopters
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Experience with Fivetran's tech stack (Java, Python, C, SQL, Bazel, React)
 - Background in developer productivity, platform engineering, or DevEx roles

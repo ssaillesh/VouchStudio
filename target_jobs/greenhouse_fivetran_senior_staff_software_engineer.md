@@ -26,7 +26,7 @@ Fivetran helps organizations automate data movement across the systems, clouds, 
 
 As we bring our teams and technology together, we’re building on the strengths of both companies while continuing to deliver the products and experiences our customers know and trust. It’s an exciting time to join us: we’re creating a company with the scale, talent, and technology to help more organizations put their data to work with greater speed, confidence, and impact.
 
-​During this transition period, you may see references to both Fivetran and dbt Labs throughout our recruiting process as we integrate our teams, systems, and career sites.
+During this transition period, you may see references to both Fivetran and dbt Labs throughout our recruiting process as we integrate our teams, systems, and career sites.
 
 **About The Role**
 
@@ -72,7 +72,7 @@ This is a full-time position based out of our Oakland, CA office. Our hybrid wor
 - Understand how to use AI code assist and coding agents to automatically generate code for features, bugs, testing, and investigation
 - Ability to use conversational AI systems (like Claude, ChatGPT, and internal chatbots) to support researching, authoring, reviewing, and synthesizing various SDLC artifacts such as TDDs, PRDs, Postmortems, Test Plans, and Proposals
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Experience in data processing (ETL, ELT) and/or cloud-based platforms
 

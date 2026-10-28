@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from html import escape
 import subprocess
 import sys
 from pathlib import Path
@@ -90,6 +91,98 @@ Exposure-level skills, never main bullets:
 | Kubernetes and Terraform | `[NO]` |
 | Networking as a main skill (exposure only, via troubleshooting) | `[NO]` |
 """
+
+KIT = """
+## 9. Resume kit (for the tailoring pipeline)
+
+Everything in this section is built only from `[V]` and `[R]` facts above.
+
+### 9.1 Role families
+
+| Code | Family | Typical titles |
+|---|---|---|
+| `dev` | DevOps, platform, SRE | DevOps Engineer, Platform Engineer, SRE |
+| `swe` | Software engineering | Software Engineer, Backend Engineer |
+| `ml` | Machine learning engineering | ML Engineer |
+| `fde` | AI engineering, forward deployed | Forward Deployed Engineer, Solutions Engineer |
+| `ana` | Data and analytics | Data Analyst, BI Analyst |
+| `test` | Test infrastructure | Test Infra, SDET |
+| `qa` | Quality and compliance | Quality Automation |
+| `ops` | Operations | Operations |
+
+### 9.2 Top proof points, ranked by strength
+
+1. **Acme:** cut deploy time 30% with a Python tool across 50+ services.
+
+### 9.3 Summaries by family
+
+- **`dev`:** Platform engineer who cut deploy time 30% across 50+ services with a **Python** tool and runs **GitLab CI/CD** pipelines with **Docker** executors.
+- **`ana`:** Analyst who built **Power BI** dashboards on **SQL Server** for 3 teams.
+
+### 9.4 Skills rows
+
+**Row library**
+
+| Row | Items |
+|---|---|
+| Cloud and DevOps | Docker, GitLab CI/CD |
+| Backend | Python, FastAPI |
+| Databases | PostgreSQL, SQL Server |
+| Analytics | Power BI, SQL Server |
+
+**Row order by family.** Use at most 5 or 6 rows.
+
+| Family | Row order |
+|---|---|
+| `dev` | Cloud and DevOps, Backend, Databases |
+| `ana` | Analytics, Backend (Python), Databases |
+
+**Guard:** any language or tool named in the job's core requirements that appears in the library must stay in skills.
+
+### 9.5 Bullet bank
+
+**Acme Corp, Platform Engineer, Toronto, Jan 2024 to Dec 2024**
+
+| ID | Bullet | Themes | Families | Impact | Keep with |
+|---|---|---|---|---|---|
+| A01 | Cut deploy time 30% with a **Python** tool across 50+ services | automation, deployment | all | 5 | |
+| A02 | Ran **GitLab CI/CD** pipelines with **Docker** executors on **Ubuntu** runners | ci_cd | dev, swe | 4 | |
+| A03 | Led troubleshooting of runner outages with the platform team | debugging, collaboration | dev | 3 | |
+
+**Beta Labs, Data Analyst, Waterloo, Jan 2023 to Apr 2023**
+
+| ID | Bullet | Themes | Families | Impact | Keep with |
+|---|---|---|---|---|---|
+| B01 | Built **Power BI** dashboards on **SQL Server** for 3 teams | dashboards, analytics | ana, dev | 4 | |
+
+**Gamma App**
+
+| ID | Bullet | Themes | Families | Impact | Keep with |
+|---|---|---|---|---|---|
+| G01 | Built a **FastAPI** service with **PostgreSQL** and **Grafana** dashboards | backend, monitoring | all | 3 | |
+
+### 9.6 Synonym map
+
+| Fact | Requirement words it can honestly cover |
+|---|---|
+| Deploy tool (A01) | release automation, developer productivity |
+
+### 9.7 Inclusion and exclusion rules
+- **Projects:** pick the top 3 projects by requirement coverage. A project only gets in if at least one of its bullets maps to a job requirement.
+- **Experience:** keep chronological order. Each included experience needs at least 3 bullets.
+
+### 9.8 Gap lines (Interests) by family
+
+| Family | Gaps |
+|---|---|
+| `dev` | Kubernetes, Terraform, Helm |
+| `ana` | statistical modelling |
+
+### 9.9 Formatting rules
+- **Bullets:** each fits on one line. Bold only tech.
+"""
+
+MASTER_KIT = MASTER + KIT
 
 TEMPLATE = r"""%-------------------------
 % Synthetic test template
@@ -261,8 +354,17 @@ class FakeTex:
             return subprocess.CompletedProcess(command, 0, f"Producer: fake\nPages:          "
                                                            f"{pages}\n", "")
         if exe == "pdftotext":
-            data = json.loads(Path(command[3]).read_text(encoding="utf-8"))
+            pdf = next(a for a in command if a.endswith(".pdf"))
+            data = json.loads(Path(pdf).read_text(encoding="utf-8"))
             text = data["text"] + "\f" + "".join("overflow text\f"
                                                  for _ in range(data["pages"] - 1))
+            if "-bbox-layout" in command:  # one line per page, nothing overlaps
+                pages = text.split("\f")[:max(1, data["pages"])]
+                body = "".join(
+                    f'<page width="612" height="792"><flow><block><line xMin="50" yMin="40" '
+                    f'xMax="560" yMax="50"><word xMin="50" yMin="40" xMax="560" yMax="50">'
+                    f'{escape(page[:60])}</word></line></block></flow></page>' for page in pages)
+                text = (f'<html xmlns="http://www.w3.org/1999/xhtml"><body><doc>{body}</doc>'
+                        f'</body></html>')
             return subprocess.CompletedProcess(command, 0, text, "")
         raise AssertionError(f"unexpected command {command}")

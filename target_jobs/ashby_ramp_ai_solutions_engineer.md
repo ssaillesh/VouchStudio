@@ -3,12 +3,12 @@
 **Company**: Ramp
 **Role**: AI Solutions Engineer
 **Source**: Ashby
-**Location**: New York, NY (HQ)
+**Location**: New York, NY (HQ); also San Francisco, CA, Boston, MA, Chicago, IL, Denver, CO, Miami, FL
 **URL**: https://jobs.ashbyhq.com/ramp/8efd3a0a-fc66-46e2-9415-bffba10e2919
 **Date Ingested**: 2026-10-27
 **Posted**: 2026-08-27
 **Employment Type**: Full-time
-**Workplace Type**: Hybrid
+**Workplace Type**: Remote
 **Department**: Sales / Sales
 **Application URL**: https://jobs.ashbyhq.com/ramp/8efd3a0a-fc66-46e2-9415-bffba10e2919/application
 **Description Completeness**: Full

@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fixtures import JD_PROCEED, MASTER, FakeTex, load_pipeline, make_workspace
+from fixtures import JD_PROCEED, MASTER, TEMPLATE, FakeTex, load_pipeline, make_workspace
 from test_pipeline import WorkspaceCase, bullets_in
 
 P = load_pipeline()
@@ -122,15 +122,15 @@ class ProvenanceEngineTests(PlanCase):
     def test_hard_gate_fails_the_build_before_anything_is_written(self):
         real_plan = P.build_resume_plan
 
-        def tampered(template, master, analysis):
-            plan = real_plan(template, master, analysis)
+        def tampered(template, master, analysis, **options):
+            plan = real_plan(template, master, analysis, **options)
             plan.entries[(2, 0)].selected[0].plain = "Cut deploy time 95% for 50+ services"
             return plan
 
         with mock.patch.object(P, "build_resume_plan", tampered):
             code, lines = self.run_cli(str(self.root / "target_jobs" / "proceed.md"))
         self.assertEqual(code, P.EXIT_FAILED)
-        self.assertIn("cannot be traced", lines[0])
+        self.assertIn("cannot be traced", lines[-1])
         written = [p.name for p in self.outputs.iterdir()] if self.outputs.exists() else []
         self.assertFalse([n for n in written if "_resume" in n], written)
 
@@ -159,7 +159,8 @@ class ProvenanceEngineTests(PlanCase):
     def test_match_sh_passes_the_new_flags_through(self):
         result = subprocess.run(
             ["bash", str(ROOT / "match.sh"), str(self.root / "target_jobs" / "proceed.md"),
-             "--dry-run", "--debug-proof", "--analyze-gap", "--workspace", str(self.root)],
+             "--dry-run", "--debug-proof", "--analyze-gap", "--no-kit", "--workspace",
+             str(self.root)],
             capture_output=True, text=True, timeout=120, check=False)
         self.assertEqual(result.returncode, P.EXIT_OK, result.stdout + result.stderr)
         self.assertIn("candidate claims traced", result.stdout)
@@ -174,11 +175,11 @@ class BuildGateTests(PlanCase):
     def gates(self, base: str = BASE) -> dict:
         return self.report(base)["resume"]["build_gates"]
 
-    def test_all_three_gates_recorded_on_success(self):
+    def test_all_gates_recorded_on_success(self):
         code, lines = self.run_cli(str(self.root / "target_jobs" / "proceed.md"))
         self.assertEqual(code, P.EXIT_OK)
         gates = self.gates()
-        self.assertEqual([g["status"] for g in gates.values()], ["passed"] * 3)
+        self.assertEqual([g["status"] for g in gates.values()], ["passed"] * 4)
         self.assertEqual(gates["gate_1_syntax"]["returncode"], 0)
         self.assertEqual(gates["gate_2_single_page"]["form_feed_pages"], 1)
         ats = gates["gate_3_ats_readability"]
@@ -188,7 +189,8 @@ class BuildGateTests(PlanCase):
                                                 "skills": True, "projects": True})
         self.assertGreater(ats["terms_checked"], 0)
         self.assertGreater(ats["metrics_checked"], 0)
-        self.assertIn("Build gates: syntax passed, single page passed, ats readability passed",
+        self.assertIn("Build gates: syntax passed, single page passed, ats readability passed, "
+                      "layout passed",
                       lines)
 
     def test_gate_1_fails_on_a_fatal_log_line_even_with_exit_0(self):
@@ -203,6 +205,12 @@ class BuildGateTests(PlanCase):
         self.assertFalse((self.outputs / f"{BASE}_resume.pdf").exists())
 
     def test_gate_2_trims_until_one_page_and_reports_it(self):
+        bullets = ("            \\resumeItem{Cut deploy time 30\\% with a \\textbf{Python} tool "
+                   "across 50+ services}\n"
+                   "            \\resumeItem{Ran \\textbf{GitLab CI/CD} pipelines with "
+                   "\\textbf{Docker} executors on \\textbf{Ubuntu} runners}\n")
+        (self.root / "template.tex").write_text(TEMPLATE.replace(bullets, bullets * 3),
+                                                encoding="utf-8")  # room above the floors
         _analysis, plan = self.plan()
         target = bullets_in(P.render_resume(plan, set(), 0)) - 1
         runner = FakeTex(lambda tex: 1 if bullets_in(tex) <= target else 2)
@@ -428,12 +436,12 @@ HAVE_TEX = bool(shutil.which("pdflatex") and shutil.which("pdftotext"))
 class RealProofOfBuildTests(PlanCase):
     def test_real_pdf_passes_all_gates_and_ships_companions(self):
         lines: list[str] = []
-        code = P.run([str(self.root / "target_jobs" / "proceed.md"), "--workspace",
+        code = P.run([str(self.root / "target_jobs" / "proceed.md"), "--no-kit", "--workspace",
                       str(self.root), "--output-dir", str(self.outputs), "--debug-proof"],
                      out=lines.append)
         self.assertEqual(code, P.EXIT_OK, "\n".join(lines))
         gates = self.report()["resume"]["build_gates"]
-        self.assertEqual([g["status"] for g in gates.values()], ["passed"] * 3)
+        self.assertEqual([g["status"] for g in gates.values()], ["passed"] * 4)
         self.assertEqual(gates["gate_3_ats_readability"]["fragmented_terms"], [])
         for suffix in ("provenance.json", "briefing.json", "briefing.md"):
             self.assertTrue((self.outputs / f"{BASE}_{suffix}").is_file(), suffix)

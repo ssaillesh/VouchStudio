@@ -54,7 +54,7 @@ This is a full-time position based out of our Denver office. Our hybrid work mod
 - Excellent verbal and written communication skills with the ability to collaborate across departments
 - Self-starter with strong organizational skills and attention to detail; comfortable working independently in a high-growth, fast-paced environment.
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Prior experience as part of an S-1 filing or IPO project team.
 - Experience with automation and AI tools to drive efficiency.

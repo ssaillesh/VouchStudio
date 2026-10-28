@@ -77,7 +77,7 @@ You’ll help ensure system changes are tested, validated, and operationally rea
 - Clear written communication skills, with the ability to document test cases, defects, and sign-off criteria for technical and business audiences.
 - A proactive, organized approach, with the ability to work across IT, Pricing and Order Operations, and Sales and Deal Desk with minimal oversight.
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Exposure to Revenue Recognition or Professional Services systems and processes.
 

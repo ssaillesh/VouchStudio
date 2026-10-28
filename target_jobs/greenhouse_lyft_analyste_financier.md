@@ -40,7 +40,7 @@ Lyft recherche un analyste financier pour rejoindre son équipe FP&A (Planificat
 - Maîtrise des outils de présentation (Google Slides/PowerPoint) et de modélisation financière; la connaissance d'Anaplan est un atout.
 - Capacité démontrée à travailler de manière autonome et à respecter les délais dans un environnement dynamique.
 - Connaissance des processus de clôture mensuelle, de l'analyse des écarts et des principes comptables généralement admis (PCGR).
-- La ​​connaissance d'Oracle ou d'un système ERP similaire est un plus.
+- La connaissance d'Oracle ou d'un système ERP similaire est un plus.
 - Une expérience dans le secteur de la mobilité partagée, les entreprises à forte intensité capitalistique ou les processus d'appel d'offres est un atout.
 - Maîtrise de l'anglais et du français; la maîtrise de l'espagnol est un plus.
 

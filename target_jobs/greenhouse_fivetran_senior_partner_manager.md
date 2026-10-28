@@ -51,7 +51,7 @@ This is a full-time position based out of a USA-based office or remote.
 - Ability to operate in a highly accountable, fast-paced work environment with integrity
 - Passion for being an inclusive, collaborative teammate focused on business outcomes
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - An existing Databricks network of sellers, solutions architects, and leaders
 - Demonstrated success in sales and alliances at technology companies; start up experience welcomed but not required

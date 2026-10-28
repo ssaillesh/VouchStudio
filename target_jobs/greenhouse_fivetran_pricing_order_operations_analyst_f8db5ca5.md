@@ -77,7 +77,7 @@ This is a hybrid role, 1-2 days in the office.
 - Clear written communication skills, with the ability to document test cases, defects, and sign-off criteria for technical and business audiences.
 - A proactive and organized approach, with the ability to work across IT, Pricing and Order Operations, and Sales and Deal Desk without heavy oversight.
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Exposure to Revenue Recognition or Professional Services systems and processes.
 

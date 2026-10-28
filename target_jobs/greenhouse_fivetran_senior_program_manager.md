@@ -48,7 +48,7 @@ This full-time position (Oakland or Denver) and reports to the Manager of Produc
 - Thrives and excels in a fast-paced, cross-functional environment with a willingness to adapt to changing priorities.
 - PMP, PMI-ACP, or other relevant project management certifications.
 
-**Bonus Skills​**
+**Bonus Skills**
 
 -Experience in data processing (ETL, ELT) and/or cloud-based platforms
 

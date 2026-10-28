@@ -54,7 +54,7 @@ We’re seeking an experienced Sr. Technical Instructor with a passion for teach
 - You communicate clearly and concisely with internal and external stakeholders
 - You thrive in an environment of cross-collaboration that moves quickly
 
-#### Bonus Skills​
+#### Bonus Skills
 
 - You have worked on customer education / training teams and know how training can drive outcomes for customers.
 - You have experience using dbt and/or teaching dbt.

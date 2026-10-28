@@ -55,4 +55,4 @@ MongoDB’s base salary range for this role is posted below. Compensation at the
 
 MongoDB’s base salary range for this role in the U.S. is:
 
-$0.01—$0.01 USD
+$101,000—$273,000 USD

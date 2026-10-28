@@ -37,7 +37,7 @@ Auth0 secures more than 100 million logins each day for customers worldwide—an
 
 - Technical background or good understanding of Application Development and IT operations; familiarity with Identity and Authentication Management software, credentialing, and cybersecurity concepts a plus.
 - Hands-on technical experience deploying, configuring, or implementing software tools and products.
-- ​​You find joy in serving the developer community and helping fellow developers get better at their jobs, with the ability to explain and translate complex technology concepts into simple and intuitive communications.
+- You find joy in serving the developer community and helping fellow developers get better at their jobs, with the ability to explain and translate complex technology concepts into simple and intuitive communications.
 - You are a strong independent contributor, but you enjoy collaborating with teammates and multi-functional teams.
 - You find a fast-paced, constantly iterative environment engaging and stimulating.
 

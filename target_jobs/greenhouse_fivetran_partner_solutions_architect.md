@@ -51,7 +51,7 @@ This is a full-time position, which can be either remote (US) or hybrid dependin
 - Strong presentation and facilitation skills for workshops, hands-on labs, keynote-adjacent sessions and large partner technical audiences.
 - Proven ability to drive outcomes in ambiguous, fast-moving environments with multiple stakeholders
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Experience owning a technical alliance, with a track record of shaping what a partner built and how the two products fit together
 - Experience with partner-facing APIs, SDKs, drivers, or integration certification programs

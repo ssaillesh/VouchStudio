@@ -81,7 +81,7 @@ Modern Data Warehouses (Snowflake / Databricks / BigQuery / Redshift), Repositor
 - Ability to tailor consistent white glove setup experiences based on an account’s size and strategic importance
 - Strong customer judgment and the ability to balance technical correctness with customer timelines and business priorities
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Experience with PrivateLink or other secure connectivity patterns
 - Experience contributing to internal enablement content or documentation

@@ -74,7 +74,7 @@ Google Suite, Notion
 - Experience driving behavior change through communications and program design
 - Excellent written and verbal communication skills
 
-**Bonus Skills​**
+**Bonus Skills**
 
 - Previous experience in founder-led startup organizations
 - Experience with Notion

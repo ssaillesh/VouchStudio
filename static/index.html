@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vouch Studio</title>
+  <link rel="stylesheet" href="/static/studio.css">
+  <script src="/static/studio.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Vouch <span>Studio</span></div>
+    <nav class="nav" aria-label="Main">
+      <a href="#/jobs" data-nav="jobs">Jobs</a>
+      <a href="#/job" data-nav="job">Workspace</a>
+      <a href="#/profile" data-nav="profile">Profile Studio</a>
+    </nav>
+    <div class="status">
+      <button type="button" id="task-pill" class="task-pill hidden"></button>
+      <span id="tools" class="tools row"></span>
+    </div>
+  </header>
+
+  <main id="view" aria-live="polite"></main>
+
+  <dialog id="fetch-dialog" aria-labelledby="fetch-title">
+    <div class="dialog-head"><h2 id="fetch-title" class="grow">Fetch jobs</h2>
+      <button type="button" class="btn ghost small" data-close>Close</button></div>
+    <div class="dialog-body">
+      <div class="form-grid">
+        <label class="field">Source
+          <select id="fetch-source">
+            <option value="free">All free sources (Greenhouse, Ashby, Simplify, Jooble)</option>
+            <option value="greenhouse">Greenhouse</option>
+            <option value="ashby">Ashby</option>
+            <option value="simplify">Simplify</option>
+            <option value="jooble">Jooble (needs JOOBLE_API_KEY)</option>
+            <option value="jobright">Jobright via Apify (billable)</option>
+            <option value="all">All sources, including Jobright when spend is allowed</option>
+          </select>
+        </label>
+        <label class="field">Keyword (Jooble and Jobright)
+          <input type="text" id="fetch-query" placeholder="Platform Engineer" maxlength="120">
+        </label>
+        <label class="field">Location (Jooble and Jobright)
+          <input type="text" id="fetch-location" placeholder="Toronto" maxlength="120">
+        </label>
+        <div class="form-grid">
+          <label class="field">Country (Jobright)
+            <input type="text" id="fetch-country" placeholder="CA" maxlength="2">
+          </label>
+          <label class="field">Limit (Jobright)
+            <input type="number" id="fetch-limit" min="1" max="1000" placeholder="25">
+          </label>
+        </div>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="fetch-dry"> Dry run (write nothing)</label>
+        <label class="check"><input type="checkbox" id="fetch-refresh"> Ignore the 1 h cache</label>
+        <label class="check" id="fetch-spend-wrap"><input type="checkbox" id="fetch-spend">
+          Allow Apify spend (capped by <code>maxTotalChargeUsd</code>)</label>
+      </div>
+      <div id="fetch-console" class="console"><span class="console-empty">Logs stream here while fetch_jobs.py runs.</span></div>
+    </div>
+    <div class="dialog-foot">
+      <span id="fetch-status" class="muted small grow"></span>
+      <button type="button" class="btn primary" id="fetch-start">Start fetch</button>
+    </div>
+  </dialog>
+
+  <dialog id="upload-dialog" aria-labelledby="upload-title">
+    <div class="dialog-head"><h2 id="upload-title" class="grow">Add a job description</h2>
+      <button type="button" class="btn ghost small" data-close>Close</button></div>
+    <div class="dialog-body">
+      <div class="form-grid">
+        <label class="field">Company <input type="text" id="upload-company" maxlength="120"></label>
+        <label class="field">Role <input type="text" id="upload-role" maxlength="160"></label>
+      </div>
+      <label class="field">Load a .md or .txt file
+        <input type="file" id="upload-file" accept=".md,.txt,text/plain,text/markdown">
+      </label>
+      <label class="field">Or paste the full posting
+        <textarea id="upload-text" rows="14" placeholder="Paste the job description, including requirements and nice-to-haves."></textarea>
+      </label>
+      <p class="muted small">Saved as <code>target_jobs/manual_&lt;company&gt;_&lt;role&gt;.md</code>. Generated files from fetch_jobs.py never overwrite it.</p>
+    </div>
+    <div class="dialog-foot">
+      <span id="upload-status" class="muted small grow"></span>
+      <button type="button" class="btn primary" id="upload-save">Save job</button>
+    </div>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+</body>
+</html>

@@ -60,7 +60,7 @@ Fivetran and dbt Labs are now one company. Together we build the data movement a
 - Strong attention to detail and prioritization. Clear written and verbal communication, including the ability to explain findings to executives and technical tradeoffs to engineers.
 - Experience influencing cross-functional, distributed teams, both asynchronously and in real time.
 
-**Bonus Skills**​
+**Bonus Skills**
 
 - Experience designing and analyzing experiments (A/B/n tests), including test design, sample size, significance, and turning results into launch decisions.
 - Deep knowledge of the SaaS customer lifecycle and business metrics, such as ARR (annual recurring revenue), retention, and expansion.
