@@ -131,5 +131,27 @@ class RecordValidationTests(unittest.TestCase):
             "# Injected ## Requirements - Acme"))
 
 
+
+class SanitizeDescriptionTests(unittest.TestCase):
+    def test_invisible_characters_that_split_keywords_are_removed(self):
+        self.assertEqual(F.sanitize_description("Py\u200bthon, Ku\u00adber\u2060netes\ufeff"),
+                         "Python, Kubernetes")
+        self.assertEqual(F.sanitize_description("a\u00a0b\x07c"), "a bc")
+
+    def test_residual_and_double_escaped_markup(self):
+        self.assertEqual(F.sanitize_description("R&amp;amp;D &amp;lt;p&amp;gt;team&amp;lt;/p&amp;gt;"),
+                         "R&D\nteam")
+        self.assertEqual(F.sanitize_description("One<br>Two<li>Three</li> <b>Four</b>"),
+                         "One\nTwo\nThree\nFour")
+        self.assertEqual(F.sanitize_description("Use <b>Go</b> daily"), "Use Go daily")
+
+    def test_clean_text_is_unchanged(self):
+        clean = ("#### About\n\n**Requirements**\n\n- C++ and Go\n- x < 5 and <T> generics\n"
+                 "- [Apply](https://example.com/?a=1&b=2)")
+        self.assertEqual(F.sanitize_description(clean), clean)
+        once = F.sanitize_description("A&amp;amp;B\u200b\n\n\n\nC")
+        self.assertEqual(F.sanitize_description(once), once)  # idempotent
+
+
 if __name__ == "__main__":
     unittest.main()

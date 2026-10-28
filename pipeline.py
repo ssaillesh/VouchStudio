@@ -167,6 +167,12 @@ class OutputError(PipelineError):
     exit_code = EXIT_FAILED
 
 
+class ProvenanceValidationError(PipelineError):
+    """A rendered claim cannot be traced to positive master evidence (hard gate)."""
+
+    exit_code = EXIT_FAILED
+
+
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -399,6 +405,7 @@ class ResumePlan:
     entry_order: dict[int, list[int]]
     summary_text: str | None
     kv_items: dict[tuple[int, int], list[str]]
+    summary_sentences: list[str] = field(default_factory=list)
     spacing_level: int = 0
     removed: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -2468,6 +2475,258 @@ def build_report(analysis: Analysis, workspace: Path) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Reverse gap analysis (below the threshold, or on request with --analyze-gap)
+# ---------------------------------------------------------------------------
+# Recommendations never add a claim. They say where a fact would go *if it is
+# true*, and what the score would become; the master profile stays the only
+# source of career facts and is never edited by the pipeline.
+OCCURRENCE_GAP_STATUS = (("gap", "GAP"), ("old", "OLD"), ("untagged", "UNTAGGED"),
+                         ("exposure", "EXPOSURE_ONLY"), ("heading", "HEADING_ONLY"),
+                         ("negated", "NEGATED"))
+GROUP_LABELS = {"ai_ml": "AI/ML", "backend": "backend", "cloud_devops": "cloud/DevOps",
+                "data": "data", "databases": "databases", "frontend": "frontend",
+                "hardware": "hardware", "observability_security": "observability/security",
+                "os": "operating systems", "process": "engineering process",
+                "spoken": "languages", "testing": "testing", "tools": "tooling"}
+MAX_GAP_RECOMMENDATIONS = 12
+WORK_ENTRY_KINDS = frozenset({"experience", "project", "research", "leadership"})
+
+
+def status_needs_target(status: str) -> bool:
+    """Statuses that point at an existing mention (MISSING picks its own target)."""
+    return status in ("GAP", "OLD", "UNTAGGED", "UNCONFIRMED", "EXPOSURE_ONLY")
+
+
+def _projected_score(breakdown: dict[str, Any], extra_weight: int) -> int:
+    total = breakdown["total_weight"]
+    matched = breakdown["matched_weight"] + extra_weight
+    return 0 if total == 0 else (200 * matched + total) // (2 * total)
+
+
+def _entry_short_name(entry: MasterEntry) -> str:
+    return re.split(r":", entry.title, maxsplit=1)[0].strip()
+
+
+def _gap_master_status(req: Requirement, master: MasterProfile) -> tuple[str, list[int]]:
+    """How the master profile currently treats an unmatched requirement."""
+    if req.status == STATUS_NO:
+        return "NO", [e["line"] for e in req.evidence]
+    if req.kind == "years_experience":
+        return "YEARS_NOT_INFERRED", []
+    if req.kind == "education":
+        return ("DEGREE_UNCLEAR" if req.status == STATUS_AMBIGUOUS else "DEGREE_MISMATCH",
+                [e["line"] for e in req.evidence])
+    keys = [req.key] if req.key else list(req.members)
+    if keys and keys[0]:
+        expanded = [k for key in keys for k in (key, *SKILL_INDEX[key].members)]
+        occs = [o for key in expanded for o in master.occurrences.get(key, [])]
+        for kind, label in OCCURRENCE_GAP_STATUS:
+            lines = sorted({o.line for o in occs if o.kind == kind})
+            if lines:
+                return label, lines
+        return "MISSING", []  # an all-[NO] group already has status explicitly_no
+    lines = [e["line"] for e in req.evidence]
+    if not lines:
+        return "MISSING", []
+    tag = master.line(lines[0]).tag
+    return ({TAG_GAP: "GAP", TAG_OLD: "OLD"}.get(tag or "", "UNTAGGED")
+            if tag not in POSITIVE_TAGS else "UNCONFIRMED", lines)
+
+
+def _entry_skills(master: MasterProfile) -> dict[str, set[str]]:
+    """Skills with positive evidence per master entry (skills-table refs included)."""
+    result: dict[str, set[str]] = {}
+    for key, occs in master.occurrences.items():
+        if key in master.global_no:
+            continue
+        for occ in occs:
+            if occ.kind != "positive":
+                continue
+            for entry_id in {occ.entry_id, *master.line(occ.line).refs}:
+                if entry_id:
+                    result.setdefault(entry_id, set()).add(key)
+    return result
+
+
+def _suggest_entry(master: MasterProfile, keys: Sequence[str],
+                   entry_skills: dict[str, set[str]]) -> tuple[MasterEntry | None, list[str]]:
+    """The experience or project entry whose evidence is closest to the missing skill."""
+    groups = {SKILL_INDEX[k].group for k in keys}
+    domains = {d for k in keys for d in SKILL_INDEX[k].domains}
+    best: tuple[int, int, MasterEntry | None, list[str]] = (0, 0, None, [])
+    for order, entry in enumerate(master.entries):
+        if entry.kind not in ("experience", "project"):
+            continue
+        skills = sorted(entry_skills.get(entry.id, set()) - set(keys),
+                        key=lambda k: SKILL_INDEX[k].display.lower())
+        related = [k for k in skills if SKILL_INDEX[k].kind == "skill"
+                   and SKILL_INDEX[k].group in groups]
+        nearby = [k for k in skills if set(SKILL_INDEX[k].domains) & domains]
+        score = 2 * len(related) + len(nearby)
+        if score > best[0]:
+            best = (score, -order, entry, [SKILL_INDEX[k].display for k in (related or nearby)])
+    return best[2], best[3][:3]
+
+
+def build_gap_analysis(analysis: Analysis, trigger: str) -> dict[str, Any]:
+    master = analysis.master
+    breakdown = analysis.breakdown
+    total = breakdown["total_weight"]
+    match_score = round(100 * breakdown["matched_weight"] / total, 2) if total else 0.0
+    entry_skills = _entry_skills(master)
+    rows: list[dict[str, Any]] = []
+    for order, req in enumerate(analysis.requirements):
+        if req.status == STATUS_MATCHED:
+            continue
+        status, lines = _gap_master_status(req, master)
+        claimable = status not in ("NO", "NEGATED", "YEARS_NOT_INFERRED", "DEGREE_MISMATCH")
+        rows.append({"order": order, "req": req, "status": status, "lines": lines,
+                     "claimable": claimable})
+
+    def describe(row: dict[str, Any]) -> dict[str, Any]:
+        req = row["req"]
+        return {"skill": req.name, "requirement_kind": req.kind, "category": req.category,
+                "weight": req.weight, "jd_status": req.status, "master_status": row["status"],
+                "master_lines": [_evidence_item(master, n) for n in row["lines"][:5]],
+                "jd_lines": req.jd_lines, "jd_excerpt": req.jd_excerpt,
+                "confidence": req.confidence,
+                "score_if_evidenced": _projected_score(breakdown, req.weight)
+                if row["claimable"] else None,
+                "claimable": row["claimable"]}
+
+    ranked = sorted(rows, key=lambda r: (-r["req"].weight, r["order"]))
+    claimable = [r for r in ranked if r["claimable"]]
+    unlock: list[dict[str, Any]] = []
+    gained = 0
+    for row in claimable:
+        if _projected_score(breakdown, gained) >= FIT_THRESHOLD:
+            break
+        gained += row["req"].weight
+        unlock.append(row)
+    projected = _projected_score(breakdown, gained)
+    reachable = projected >= FIT_THRESHOLD
+    recommendations: list[dict[str, Any]] = []
+    targets: dict[int, MasterEntry | None] = {}
+    for row in ranked:
+        req = row["req"]
+        name = req.name
+        lines = row["lines"]
+        where = ", ".join(str(n) for n in lines[:3])
+        gain = _projected_score(breakdown, req.weight)
+        gain_text = (f"that alone would move the score from {analysis.score} to {gain}"
+                     if row["claimable"] else "")
+        keys = [req.key] if req.key else list(req.members)
+        entry = master.entry(master.line(lines[0]).entry_id) if lines else None
+        if entry is not None and entry.kind not in WORK_ENTRY_KINDS:
+            entry = None  # a skills-table or do-not-claim row is not where work is described
+        if entry is None and status_needs_target(row["status"]) and keys and keys[0]:
+            entry = _suggest_entry(master, keys, entry_skills)[0]
+        status = row["status"]
+        action = "do_not_claim"
+        if status == "NO":
+            entry = None
+            text = (f"{name} is marked [NO] in the master profile (line {where}). It is never "
+                    f"claimed and no edit is recommended; treat it as a real gap for this role.")
+        elif status == "YEARS_NOT_INFERRED":
+            action = "not_actionable"
+            text = (f"'{name}': years are never inferred from co-op terms. Address the length "
+                    f"of your experience in a cover letter or interview instead.")
+        elif status in ("DEGREE_MISMATCH", "DEGREE_UNCLEAR"):
+            action = "not_actionable" if status == "DEGREE_MISMATCH" else "human_judgment"
+            text = f"'{name}': {req.explanation}"
+        elif status in ("GAP", "OLD", "UNTAGGED", "UNCONFIRMED"):
+            action = "confirm_existing_mention"
+            label = {"UNTAGGED": "untagged", "UNCONFIRMED": "not tagged [V]/[R]"}.get(
+                status, f"tagged [{status}]")
+            text = (f"{name} is mentioned on line {where}"
+                    + (f" in '{_entry_short_name(entry)}'" if entry else "")
+                    + f" but is {label}. If you can confirm it, re-tag that line [V] (or [R] "
+                      f"for repository evidence); {gain_text}.")
+        elif status == "EXPOSURE_ONLY":
+            action = "deepen_evidence"
+            text = (f"{name} is exposure-level only (line {where}). It counts once a [V] line "
+                    + (f"in '{_entry_short_name(entry)}' " if entry else "")
+                    + f"shows hands-on use; {gain_text}.")
+        elif status == "NEGATED":
+            action = "acknowledge_gap"
+            text = (f"The master profile states you have not used {name} (line {where}). Treat "
+                    f"it as a real gap for this role; nothing is suggested against your own "
+                    f"statement.")
+        elif status == "HEADING_ONLY":
+            action = "confirm_existing_mention"
+            text = (f"{name} appears only in a heading (line {where}). If you have used it, add "
+                    f"a [V] line under that entry that shows what you did; {gain_text}.")
+        else:
+            action = "add_evidence_if_true"
+            target, related = (_suggest_entry(master, keys, entry_skills)
+                               if keys and keys[0] else (None, []))
+            entry = target
+            if req.kind == "unknown_named":
+                text = (f"'{name}' is outside the skill vocabulary (low-confidence extraction). "
+                        f"If it is a real requirement you meet, add a [V] line naming it; "
+                        f"{gain_text}.")
+            elif target is not None:
+                group = GROUP_LABELS.get(SKILL_INDEX[keys[0]].group, "related")
+                text = (f"No line in {master.path.name} mentions {name}. If you have real "
+                        f"{name} experience, adding it to '{_entry_short_name(target)}' would "
+                        f"fit best: that entry already evidences {', '.join(related)} "
+                        f"({group} work); {gain_text}. Nothing is claimed until that [V] line "
+                        f"exists.")
+            else:
+                text = (f"No line in {master.path.name} mentions {name}. If you have used it, "
+                        f"add a [V] line to the entry where you did; {gain_text}.")
+        targets[row["order"]] = entry
+        recommendations.append({
+            "requirement": name, "category": req.category, "weight": req.weight,
+            "action": action, "target_entry": (_entry_short_name(entry) if entry else None),
+            "target_entry_id": entry.id if entry else None,
+            "score_if_evidenced": gain if row["claimable"] else None,
+            "recommendation": text})
+    if unlock:
+        parts = []
+        for row in unlock:
+            target = targets.get(row["order"])
+            parts.append(row["req"].name + (f" (in '{_entry_short_name(target)}')"
+                                            if target else ""))
+        verb = "would unlock" if reachable else "would still leave the score below"
+        summary = (f"Evidencing {', '.join(parts)}, if true, would raise the score from "
+                   f"{analysis.score} to {projected}, which {verb} the {FIT_THRESHOLD} threshold "
+                   f"for this {analysis.domain['primary']} role.")
+        recommendations.insert(0, {"requirement": None, "category": None, "weight": gained,
+                                   "action": "unlock_plan", "target_entry": None,
+                                   "target_entry_id": None, "score_if_evidenced": projected,
+                                   "recommendation": summary})
+    elif analysis.score < FIT_THRESHOLD:
+        recommendations.insert(0, {"requirement": None, "category": None, "weight": 0,
+                                   "action": "unlock_plan", "target_entry": None,
+                                   "target_entry_id": None, "score_if_evidenced": None,
+                                   "recommendation": "No claimable gap remains: every unmatched "
+                                                     "requirement is [NO] or not inferable."})
+    return {
+        "company": analysis.jd.company,
+        "role": analysis.jd.role,
+        "source_job_description": analysis.jd.display_path,
+        "trigger": trigger,
+        "match_score": match_score,
+        "fit_score": analysis.score,
+        "threshold": FIT_THRESHOLD,
+        "verdict": analysis.verdict,
+        "primary_domain": analysis.domain["primary"],
+        "missing_critical_skills": [describe(r) for r in ranked
+                                    if r["req"].category in ("mandatory", "required")],
+        "missing_preferred_skills": [describe(r) for r in ranked
+                                     if r["req"].category == "preferred"],
+        "unlock_plan": {"reachable": reachable, "projected_score": projected,
+                        "requirements": [r["req"].name for r in unlock],
+                        "claimable_weight_available": sum(r["req"].weight for r in claimable)},
+        "actionable_recommendations": recommendations[:MAX_GAP_RECOMMENDATIONS + 1],
+        "policy": ("Recommendations are conditional: add a [V]/[R] line only for work you "
+                   "actually did. [NO] skills are never suggested. The pipeline never edits "
+                   "the master profile."),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Template parsing (template.tex is the formatting source, never a fact source)
 # ---------------------------------------------------------------------------
 ENTRY_MACROS = {"resumeSubheading": 4, "resumeProjectHeading": 2}
@@ -3178,6 +3437,7 @@ def _verified_summary(section: TemplateSection, master: MasterProfile,
     if not kept:
         plan.warnings.append(f"Section '{section.title}' dropped: no sentence could be verified")
         return None
+    plan.summary_sentences = kept
     return "\n    " + " ".join(kept) + "\n    "
 
 
@@ -3488,10 +3748,24 @@ def compile_tex(tex: str, build_dir: Path, jobname: str, tools: ToolSet, texinpu
         return CompileResult(False, completed.returncode, pdf_path, log_path, log,
                              f"{tools.engine_name} exited with {completed.returncode}: "
                              f"{collapse_ws(detail)[:300]}")
+    fatal = fatal_log_lines(log)
+    if fatal:
+        return CompileResult(False, completed.returncode, pdf_path, log_path, log,
+                             f"{tools.engine_name} exited 0 but logged a fatal error: "
+                             f"{collapse_ws(fatal[0])[:300]}")
     if not pdf_path.exists() or pdf_path.stat().st_size == 0:
         return CompileResult(False, completed.returncode, pdf_path, log_path, log,
                              "compiler reported success but produced no PDF")
     return CompileResult(True, completed.returncode, pdf_path, log_path, log, "")
+
+
+FATAL_LOG_LINE = re.compile(r"^(?:! |\S+\.tex:\d+: )|Emergency stop|Fatal error occurred|"
+                            r"LaTeX Error:")
+
+
+def fatal_log_lines(log: str) -> list[str]:
+    """Error lines of a TeX log; any one fails Gate 1 even when the exit code is 0."""
+    return [line for line in log.splitlines() if FATAL_LOG_LINE.search(line)]
 
 
 def _alnum(text: str) -> str:
@@ -3560,6 +3834,135 @@ def verify_pdf(pdf_path: Path, tools: ToolSet, expected: Sequence[str],
     return PdfCheck(ok=not reasons, pages=pages, pdfinfo_pages=info_pages,
                     pdftotext_pages=text_pages, method=method or "none", reasons=reasons,
                     missing_content=missing[:20], limitations=limitations)
+
+
+# ---------------------------------------------------------------------------
+# Gate 3: ATS machine readability of the text extracted from the PDF
+# ---------------------------------------------------------------------------
+CORE_ATS_SECTIONS = ("education", "experience", "skills", "projects")
+LATEX_ARTIFACT = re.compile(r"\\[A-Za-z]+|\\[&%$#_{}~^]|\$\|\$|textbackslash|textasciitilde|"
+                            r"�|[\x00-\x08\x0b\x0e-\x1f]")
+METRIC_TOKEN = re.compile(r"(?<![A-Za-z0-9.,])[$~]?\d+(?:[,.:]\d+)*"
+                          r"(?:%|\+|[KMBkx]\b|(?:am|pm|ms|s)\b|(?![A-Za-z0-9]))")
+
+
+@dataclass
+class AtsCheck:
+    ok: bool
+    section_order: list[str]
+    out_of_order_sections: list[str]
+    missing_sections: list[str]
+    core_sections: dict[str, bool]
+    terms_checked: int
+    fragmented_terms: list[str]
+    latex_artifacts: list[str]
+    metrics_checked: int
+    missing_metrics: list[str]
+    reasons: list[str]
+
+
+def _ats_normalize(text: str) -> str:
+    return collapse_ws(normalize_text(text)).casefold()
+
+
+def rendered_section_titles(plan: ResumePlan, removed: set[tuple]) -> list[str]:
+    """Section titles in the order render_resume emits them."""
+    titles = []
+    for si, _entries in active_model(plan, removed):
+        section = plan.template.sections[si]
+        if section.kind == "paragraph" and plan.summary_text is None:
+            continue
+        if section.kind == "keyvalue" and not any(plan.kv_items.get((si, li))
+                                                   for li in range(len(section.kv_lines))):
+            continue
+        titles.append(section.title)
+    return titles
+
+
+def ats_terms_and_metrics(plan: ResumePlan, removed: set[tuple]) -> tuple[list[str], list[str]]:
+    """Vocabulary terms in the rendered body and the metric tokens of kept bullets."""
+    body = render_resume(plan, removed, 0).split("\\begin{document}", 1)[1]
+    body = body.replace(plan.template.header, "", 1)
+    terms: list[str] = []
+    for mention in SKILL_FINDER.find(latex_to_plain(body)):
+        if mention.text not in terms:
+            terms.append(mention.text)
+    metrics: list[str] = []
+    for _si, entries in active_model(plan, removed):
+        for _ei, bullets in entries:
+            for cand in bullets:
+                metrics += [t for t in _metric_tokens(cand.plain) if t not in metrics]
+    return terms, metrics
+
+
+def check_ats_text(text: str, titles: Sequence[str], terms: Sequence[str],
+                   metrics: Sequence[str]) -> AtsCheck:
+    """Reading order of section headers, intact technical terms, no LaTeX residue.
+
+    Headers are matched as standalone lines first (real pdftotext output), then
+    as text after the previous header (single-line extractions).
+    """
+    reasons: list[str] = []
+    normalized_lines = [_ats_normalize(line) for line in text.split("\n")]
+    joined = "\n".join(normalized_lines)
+    cursor = 0
+    found: list[str] = []
+    out_of_order: list[str] = []
+    missing_sections: list[str] = []
+    for title in titles:
+        wanted = _ats_normalize(title)
+        match = re.compile(rf"(?m)^{re.escape(wanted)}$").search(joined, cursor)
+        position = match.start() if match else joined.find(wanted, cursor)
+        if position < 0:
+            (out_of_order if wanted in joined else missing_sections).append(title)
+            continue
+        found.append(title)
+        cursor = position + len(wanted)
+    if out_of_order:
+        reasons.append(f"section headers out of reading order: {', '.join(out_of_order)}")
+    if missing_sections:
+        reasons.append(f"section headers missing from the text layer: "
+                       f"{', '.join(missing_sections)}")
+    flat = _ats_normalize(text)
+    fragmented = [term for term in terms if _ats_normalize(term) not in flat]
+    if fragmented:
+        reasons.append(f"technical terms fragmented or corrupted in the text layer: "
+                       f"{', '.join(fragmented[:10])}")
+    artifacts = sorted({m.group(0) for m in LATEX_ARTIFACT.finditer(text)})
+    if artifacts:
+        reasons.append(f"LaTeX residue in the text layer: {', '.join(map(repr, artifacts[:10]))}")
+    lost = [metric for metric in metrics if _ats_normalize(metric) not in flat]
+    if lost:
+        reasons.append(f"metrics lost or altered in the text layer: {', '.join(lost[:10])}")
+    kinds = {template_section_kind(title) for title in titles}
+    return AtsCheck(ok=not reasons, section_order=found, out_of_order_sections=out_of_order,
+                    missing_sections=missing_sections,
+                    core_sections={kind: kind in kinds for kind in CORE_ATS_SECTIONS},
+                    terms_checked=len(terms), fragmented_terms=fragmented[:20],
+                    latex_artifacts=artifacts[:20], metrics_checked=len(metrics),
+                    missing_metrics=lost[:20], reasons=reasons)
+
+
+def ats_readability_check(pdf_path: Path, tools: ToolSet, plan: ResumePlan, removed: set[tuple],
+                          runner: Callable[..., subprocess.CompletedProcess] = subprocess.run
+                          ) -> AtsCheck:
+    titles = rendered_section_titles(plan, removed)
+    terms, metrics = ats_terms_and_metrics(plan, removed)
+    failure = AtsCheck(False, [], [], list(titles), {}, len(terms), [], [], len(metrics), [], [])
+    if not tools.pdftotext:
+        failure.reasons.append("pdftotext unavailable: the text layer could not be checked")
+        return failure
+    try:
+        result = runner([tools.pdftotext, "-enc", "UTF-8", str(pdf_path), "-"],
+                        capture_output=True, text=True, timeout=TOOL_TIMEOUT_SECONDS,
+                        check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        failure.reasons.append(f"pdftotext failed: {exc}")
+        return failure
+    if result.returncode != 0:
+        failure.reasons.append(f"pdftotext failed (exit {result.returncode})")
+        return failure
+    return check_ats_text(result.stdout or "", titles, terms, metrics)
 
 
 def trim_sequence(plan: ResumePlan) -> list[tuple[tuple, str]]:
@@ -3870,6 +4273,421 @@ def previous_valid_pdf(outputs_dir: Path, base: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Provenance: every rendered claim traced to positive master evidence
+# ---------------------------------------------------------------------------
+REPO_LINK = re.compile(r"(?:https?://)?(?:github\.com|gitlab\.com|bitbucket\.org)/[A-Za-z0-9_.-]+"
+                       r"(?:/[A-Za-z0-9_.-]+)?|(?:https?://)?[A-Za-z0-9-]+\."
+                       r"(?:vercel\.app|github\.io|netlify\.app)", re.IGNORECASE)
+TAG_LABELS = {TAG_VERIFIED: "[V]", TAG_REPO: "[R]", TAG_TABLE: "skills table"}
+
+
+def _entry_links(master: MasterProfile, entry: MasterEntry | None, header_raw: str = "") -> list[str]:
+    links: list[str] = []
+    found = [u.split("://", 1)[-1] for u in re.findall(r"\\href\{([^{}]*)\}", header_raw)
+             if not u.startswith("mailto:")]
+    if entry is not None:
+        for n in range(entry.start_line, min(entry.end_line, len(master.lines)) + 1):
+            found.extend(m.group(0) for m in REPO_LINK.finditer(master.line(n).raw))
+    for link in found:
+        link = link.split("://", 1)[-1].rstrip("./")
+        if link and link not in links:
+            links.append(link)
+    return links
+
+
+def _proof_line(master: MasterProfile, n: int) -> dict[str, Any]:
+    line = master.line(n)
+    entry = master.entry(line.entry_id)
+    tag = TAG_LABELS.get(line.tag or "", f"[{line.tag}]" if line.tag else line.kind)
+    return {"line": n, "tag": tag, "section": line.section,
+            "entry": entry.title if entry else None, "text": excerpt(_line_text(line), 200)}
+
+
+def _skill_lines(master: MasterProfile, key: str, lines: set[int] | None,
+                 kinds: frozenset[str] = frozenset({"positive"})) -> list[int]:
+    """Lines evidencing a skill (or, for a category, one of its members)."""
+    found: set[int] = set()
+    for skill in (key, *SKILL_INDEX[key].members):
+        if skill in master.global_no:
+            continue
+        found |= {o.line for o in master.occurrences.get(skill, [])
+                  if o.kind in kinds and (lines is None or o.line in lines)}
+    return sorted(found)
+
+
+def _wording_lines(plain: str, scope: EvidenceScope, cited: Sequence[int]) -> list[int]:
+    lines = [n for n in cited if n in scope.texts]
+    if not lines:
+        claim = content_stems(plain)
+        ranked = sorted(scope.line_numbers,
+                        key=lambda n: (-len(claim & content_stems(scope.texts.get(n, ""))), n))
+        lines = [n for n in ranked[:3] if claim & content_stems(scope.texts.get(n, ""))]
+    return lines
+
+
+def _trace_claim(kind: str, plain: str, master: MasterProfile, scope: EvidenceScope,
+                 check: ClaimCheck, problems: list[str]) -> dict[str, Any]:
+    """Evidence for one checked claim: wording lines, skill lines and metric lines."""
+    if not check.ok:
+        problems.extend(check.reasons)
+    lines = _wording_lines(plain, scope, check.source_lines)
+    positive_scope = {n for n in scope.texts if master.line(n).tag in POSITIVE_TAGS}
+    skills = []
+    for key in check.skills:
+        skill_lines = _skill_lines(master, key, positive_scope if scope.entry_id else None)
+        if not skill_lines:
+            problems.append(f"no positive line for '{SKILL_INDEX[key].display}'")
+        skills.append({"skill": SKILL_INDEX[key].display, "lines": skill_lines[:5]})
+    metrics = []
+    for match in STANDALONE_NUMBER.finditer(plain):
+        value = _normalize_number(match.group(0))
+        sources = [n for n in scope.numbers.get(value, []) if n in lines] or \
+            scope.numbers.get(value, [])[:1]
+        if not sources:
+            problems.append(f"number '{match.group(0)}' has no source line")
+            continue
+        metrics.append({"value": match.group(0), "line": sources[0]})
+        if sources[0] not in lines:
+            lines.append(sources[0])
+    for token in ALNUM_RUN.findall(plain):  # verbatim codes such as 8am, 180K, P99
+        if not (any(ch.isdigit() for ch in token) and any(ch.isalpha() for ch in token)):
+            continue
+        holders = [n for n in sorted(scope.texts)
+                   if token.lower() in {t.lower() for t in ALNUM_RUN.findall(scope.texts[n])}]
+        sources = [n for n in holders if n in lines] or holders[:1]
+        if not sources:
+            problems.append(f"token '{token}' has no source line")
+            continue
+        metrics.append({"value": token, "line": sources[0]})
+        if sources[0] not in lines:
+            lines.append(sources[0])
+    if not lines:
+        problems.append("no positive master line supports this wording")
+    return {"evidence": [_proof_line(master, n) for n in sorted(lines)], "skills": skills,
+            "metrics": metrics, "wording_support": check.support}
+
+
+def _evidence_problems(master: MasterProfile, evidence: Sequence[dict[str, Any]],
+                       entry_id: str | None, allow_headings: bool = False) -> list[str]:
+    problems = []
+    entry = master.entry(entry_id)
+    for item in evidence:
+        line = master.line(item["line"])
+        if allow_headings and line.kind in ("heading", "bold") and line.tag in (
+                None, TAG_VERIFIED, TAG_REPO) and (line.entry_id == entry_id or (
+                    entry is not None and item["line"] == entry.start_line)):
+            continue  # entry headers may cite their own heading and label lines
+        if line.meta or line.tag not in POSITIVE_TAGS:
+            problems.append(f"cites line {item['line']}, which is not tagged [V]/[R]")
+        elif entry_id is not None and line.entry_id != entry_id and entry_id not in line.refs:
+            problems.append(f"cites line {item['line']}, which belongs to another entry")
+    return problems
+
+
+def _kv_item_lines(plain: str, master: MasterProfile, exposure_ok: bool) -> list[int]:
+    kinds = frozenset({"positive", "exposure"}) if exposure_ok else frozenset({"positive"})
+    lines: set[int] = set()
+    mentions = SKILL_FINDER.find(plain)
+    for mention in mentions:
+        lines |= set(_skill_lines(master, mention.key, None, kinds)[:3])
+    covered = [(m.start, m.end) for m in mentions]
+    words = [m.group(0).rstrip(".") for m in re.finditer(r"[A-Za-z][A-Za-z0-9+#.-]*", plain)
+             if not any(s <= m.start() < e for s, e in covered)]
+    words = [w for w in words if len(w) >= 2 and w.lower() not in STOPWORDS
+             and (re.search(r"[A-Z]", w) or not mentions)]
+    for word in words:
+        for line in master.lines:
+            if not line.meta and line.tag in POSITIVE_TAGS and \
+                    _literal_in(_line_text(line).lower(), word):
+                lines.add(line.number)
+                break
+    return sorted(lines)
+
+
+def build_provenance(plan: ResumePlan, master: MasterProfile, removed: set[tuple]
+                     ) -> dict[str, Any]:
+    """Map every claim that will be rendered to master lines; raise on any gap.
+
+    This is a hard gate that runs before anything is written or compiled. It
+    re-verifies each claim independently of the selection step, so a bug there
+    cannot put an untraceable claim on the page.
+    """
+    claims: list[dict[str, Any]] = []
+    untraced: list[str] = []
+
+    def add(record: dict[str, Any], problems: list[str]) -> None:
+        record["traced"] = not problems
+        if problems:
+            record["problems"] = problems
+            untraced.append(f"{record['type']} {record['text'][:70]!r}: {problems[0]}")
+        claims.append(record)
+
+    for si, entries in active_model(plan, removed):
+        section = plan.template.sections[si]
+        if section.kind == "paragraph":
+            if plan.summary_text is None:
+                continue
+            scope = build_scope(master, None)
+            for sentence in plan.summary_sentences:
+                plain = latex_to_plain(sentence)
+                problems: list[str] = []
+                trace = _trace_claim("summary_sentence", plain, master, scope,
+                                     verify_claim(plain, master, scope), problems)
+                problems += _evidence_problems(master, trace["evidence"], None)
+                add({"id": f"s{si}.summary.{len(claims)}", "type": "summary_sentence",
+                     "section": section.title, "entry": None, "latex": sentence, "text": plain,
+                     "master_entry": None, **trace}, problems)
+            continue
+        if section.kind == "keyvalue":
+            for li, kv in enumerate(section.kv_lines):
+                label = kv.label.lower()
+                exposure_ok = "familiar" in label or "interest" in label
+                for item in plan.kv_items.get((si, li), []):
+                    plain = latex_to_plain(item)
+                    lines = _kv_item_lines(plain, master, exposure_ok)
+                    problems = [] if lines else ["no master line names this item"]
+                    reason = _kv_item_problem(plain, master, exposure_ok, _positive_text(master))
+                    if reason:
+                        problems.append(reason)
+                    add({"id": f"s{si}.l{li}.{slugify(plain, 30)}", "type": "skills_item",
+                         "section": section.title, "entry": kv.label, "latex": item,
+                         "text": plain, "master_entry": None,
+                         "evidence": [_proof_line(master, n) for n in lines]}, problems)
+            continue
+        for ei, bullets in entries:
+            ep = plan.entries[(si, ei)]
+            entry = section.entries[ei]
+            kind = template_section_kind(section.title)
+            master_entry = master.entry(ep.master_entry_id)
+            entry_info = None if master_entry is None else {
+                "id": master_entry.id, "title": master_entry.title,
+                "section": master_entry.section, "heading_line": master_entry.start_line,
+                "links": _entry_links(master, master_entry, ep.header_raw or entry.header_raw)}
+            entry_name = latex_to_plain(entry.args[0])
+            header_check = _verify_header(entry, kind, master, ep.master_entry_id) \
+                if master_entry else None
+            problems = [] if master_entry else ["entry is not mapped to a master entry"]
+            header_lines: list[int] = []
+            if master_entry is not None and header_check is not None:
+                if not header_check.ok:
+                    problems.extend(header_check.reasons)
+                header_lines = sorted({master_entry.start_line, *header_check.source_lines})
+            header_plain = " | ".join(latex_to_plain(a) for a in entry.args if latex_to_plain(a))
+            evidence = [_proof_line(master, n) for n in header_lines]
+            problems += _evidence_problems(master, evidence, ep.master_entry_id,
+                                           allow_headings=True)
+            add({"id": f"s{si}.e{ei}.header", "type": "entry_header", "section": section.title,
+                 "entry": entry_name, "latex": (ep.header_raw or entry.header_raw).strip(),
+                 "text": header_plain, "master_entry": entry_info, "evidence": evidence},
+                problems)
+            if master_entry is None:
+                continue
+            scope = build_scope(master, ep.master_entry_id)
+            positive_scope = {n for n in scope.texts if master.line(n).tag in POSITIVE_TAGS}
+            emph = EMPH_PATTERN.search((ep.header_raw or entry.header_raw)) \
+                if kind in TECH_LIST_SECTIONS else None
+            if emph:
+                content, _end = read_group(ep.header_raw or entry.header_raw, emph.end())
+                for item in _split_items(content):
+                    plain = latex_to_plain(item)
+                    keys = SKILL_FINDER.keys(plain)
+                    lines: list[int] = []
+                    for key in keys:
+                        lines += [n for n in _skill_lines(master, key, positive_scope)[:3]
+                                  if n not in lines]
+                    if not keys:
+                        lines = _wording_lines(plain, scope, [])
+                    item_problems = [] if lines else ["no positive line in this entry names it"]
+                    if any(key in master.global_no for key in keys):
+                        item_problems.append("names a [NO] skill")
+                    add({"id": f"s{si}.e{ei}.stack.{slugify(plain, 30)}", "type": "stack_item",
+                         "section": section.title, "entry": entry_name, "latex": item,
+                         "text": plain, "master_entry": entry_info,
+                         "evidence": [_proof_line(master, n) for n in sorted(lines)]},
+                        item_problems)
+            for cand in bullets:
+                problems = []
+                trace = _trace_claim("bullet", cand.plain, master, scope,
+                                     verify_claim(cand.plain, master, scope), problems)
+                problems += _evidence_problems(master, trace["evidence"], ep.master_entry_id)
+                add({"id": f"s{si}.e{ei}.b{cand.bullet_index}", "type": "bullet",
+                     "section": section.title, "entry": entry_name, "latex": cand.raw,
+                     "text": cand.plain, "master_entry": entry_info,
+                     "matched_requirements": list(cand.req_hits),
+                     "relevance": cand.relevance, **trace}, problems)
+    if untraced:
+        raise ProvenanceValidationError(
+            f"{len(untraced)} claim(s) cannot be traced to [V]/[R] evidence in "
+            f"{master.path.name}; nothing was written. First: " + "; ".join(untraced[:3]))
+    counts: dict[str, int] = {}
+    for claim in claims:
+        counts[claim["type"]] = counts.get(claim["type"], 0) + 1
+    return {"master_profile": master.path.name,
+            "master_profile_sha256": sha256_text("\n".join(l.raw for l in master.lines)),
+            "rule": "Every rendered claim cites [V], [R] or skills-table lines of the master "
+                    "profile. Entry headers may also cite their own heading line, and "
+                    "'Familiar with'/'Interests' items may cite exposure-table rows. Any gap "
+                    "raises ProvenanceValidationError before anything is written.",
+            "summary": {"claims": len(claims), "traced": len(claims), "by_type": counts},
+            "claims": claims}
+
+
+# ---------------------------------------------------------------------------
+# Interview briefing (written next to every verified resume)
+# ---------------------------------------------------------------------------
+# Every sentence is either verbatim JD text, verbatim resume text with its master
+# lines, or fixed template wording. Nothing is paraphrased or invented.
+BRIEFING_CONTEXT_LINES = 5
+BRIEFING_FOCUS_REQUIREMENTS = 8
+BRIEFING_STAR_PROMPTS = 3
+CONTEXT_SECTIONS = frozenset({"responsibilities", "mandatory", "required", "intro",
+                              "unclassified", "preferred"})
+
+
+def _technical_context(analysis: Analysis) -> list[dict[str, Any]]:
+    """JD lines carrying the most requirement weight, quoted verbatim."""
+    weight: dict[int, int] = {}
+    names: dict[int, list[tuple[str, str]]] = {}
+    for req in analysis.requirements:
+        for n in req.jd_lines:
+            weight[n] = weight.get(n, 0) + req.weight
+            if (req.name, req.status) not in names.setdefault(n, []):
+                names[n].append((req.name, req.status))
+    lines = [l for l in analysis.jd.lines
+             if not l.is_heading and l.section_type in CONTEXT_SECTIONS
+             and weight.get(l.number) and not is_pay_text(l.text)]
+    ranked = sorted(lines, key=lambda l: (-weight[l.number], l.number))[:BRIEFING_CONTEXT_LINES]
+    return [{"jd_line": l.number, "section": l.section_title or l.section_type,
+             "text": collapse_ws(l.text.lstrip("-*• ")), "requirement_weight": weight[l.number],
+             "requirements": [{"name": n, "status": s} for n, s in names[l.number]]}
+            for l in ranked]
+
+
+def _metric_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    for match in METRIC_TOKEN.finditer(text):
+        if match.group(0) not in tokens:
+            tokens.append(match.group(0))
+    return tokens
+
+
+def build_briefing(analysis: Analysis, provenance: dict[str, Any], pdf_name: str
+                   ) -> dict[str, Any]:
+    bullets = [{**c, "entry": c["entry"].split(" | ")[0].strip()}  # drop project stack lists
+               for c in provenance["claims"] if c["type"] == "bullet"]
+    metrics = []
+    for claim in bullets:
+        tokens = _metric_tokens(claim["text"])
+        if tokens:
+            metrics.append({"metrics": tokens, "entry": claim["entry"], "bullet": claim["text"],
+                            "master_lines": sorted({m["line"] for m in claim["metrics"]})})
+    order = {id(req): i for i, req in enumerate(analysis.requirements)}
+    matched = sorted((r for r in analysis.requirements if r.status == STATUS_MATCHED),
+                     key=lambda r: (-r.weight, order[id(r)]))
+    prompts: list[dict[str, Any]] = []
+    used_bullets: set[str] = set()
+    used_entries: set[str] = set()
+
+    def pick(pool: list[dict[str, Any]]) -> dict[str, Any] | None:
+        pool = [c for c in pool if c["id"] not in used_bullets]
+        if not pool:
+            return None
+        return min(pool, key=lambda c: (c["entry"] in used_entries,
+                                        not _metric_tokens(c["text"]), -c["relevance"],
+                                        bullets.index(c)))
+
+    def prompt(claim: dict[str, Any], req: Requirement | None) -> dict[str, Any]:
+        used_bullets.add(claim["id"])
+        used_entries.add(claim["entry"])
+        tokens = _metric_tokens(claim["text"])
+        lines = [e["line"] for e in claim["evidence"]]
+        master_entry = (claim.get("master_entry") or {}).get("title") or claim["entry"]
+        return {
+            "requirement": req.name if req else None,
+            "category": req.category if req else None,
+            "jd_excerpt": req.jd_excerpt if req else None,
+            "likely_question": (f"Tell me about a time you used {req.name}." if req else
+                                f"Walk me through your work at {claim['entry']}."),
+            "situation": f"{claim['entry']} ({master_entry})",
+            "task": (f"The posting asks for {req.name}: \"{req.jd_excerpt}\"" if req else
+                     "Strongest remaining evidence on this resume."),
+            "action": claim["text"],
+            "result": (", ".join(tokens) if tokens else
+                       f"No metric in this bullet; describe the outcome only as master lines "
+                       f"{', '.join(map(str, lines))} state it."),
+            "evidence_lines": claim["evidence"],
+        }
+
+    for req in matched:
+        if len(prompts) == BRIEFING_STAR_PROMPTS:
+            break
+        claim = pick([c for c in bullets if req.name in c["matched_requirements"]])
+        if claim is not None:
+            prompts.append(prompt(claim, req))
+    while len(prompts) < BRIEFING_STAR_PROMPTS:
+        claim = pick(bullets)
+        if claim is None:
+            break
+        prompts.append(prompt(claim, None))
+    focus = sorted(analysis.requirements, key=lambda r: (-r.weight, order[id(r)]))
+    return {
+        "company": analysis.jd.company,
+        "role": analysis.jd.role,
+        "source_job_description": analysis.jd.display_path,
+        "resume_pdf": pdf_name,
+        "fit_score": analysis.score,
+        "primary_domain": analysis.domain["primary"],
+        "technical_context": _technical_context(analysis),
+        "requirements_to_prepare": [
+            {"name": r.name, "category": r.category, "weight": r.weight, "status": r.status}
+            for r in focus[:BRIEFING_FOCUS_REQUIREMENTS]],
+        "highlighted_metrics": metrics,
+        "star_prompts": prompts,
+        "note": ("Technical context is quoted verbatim from the job description; actions, "
+                 "results and metrics are verbatim resume bullets with their master lines."),
+    }
+
+
+def render_briefing_markdown(briefing: dict[str, Any]) -> str:
+    out = [f"# Interview briefing: {briefing['role']} at {briefing['company']}", "",
+           f"- Job description: `{briefing['source_job_description']}`",
+           f"- Resume: `{briefing['resume_pdf']}` (fit score {briefing['fit_score']}, "
+           f"{briefing['primary_domain']})", "",
+           "## Technical context (verbatim from the job description)", ""]
+    for item in briefing["technical_context"]:
+        reqs = ", ".join(f"{r['name']} ({r['status'].replace('_', ' ')})"
+                         for r in item["requirements"])
+        out.append(f"- **JD line {item['jd_line']}** ({item['section']}): {item['text']}  ")
+        out.append(f"  _Requirements:_ {reqs}")
+    if not briefing["technical_context"]:
+        out.append("- No weighted requirement lines were found in the job description.")
+    out += ["", "## Requirements to prepare for", "", "| Requirement | Category | Status |",
+            "|---|---|---|"]
+    for req in briefing["requirements_to_prepare"]:
+        out.append(f"| {req['name']} | {req['category']} | {req['status'].replace('_', ' ')} |")
+    out += ["", "## Highlighted metrics in this resume", ""]
+    for item in briefing["highlighted_metrics"]:
+        lines = ", ".join(map(str, item["master_lines"])) or "-"
+        out.append(f"- **{', '.join(item['metrics'])}** ({item['entry']}): {item['bullet']} "
+                   f"_(master lines {lines})_")
+    if not briefing["highlighted_metrics"]:
+        out.append("- This resume build contains no metrics.")
+    out += ["", "## STAR talking points", ""]
+    for number, item in enumerate(briefing["star_prompts"], 1):
+        heading = item["requirement"] or "Additional evidence"
+        out += [f"### {number}. {heading}", "",
+                f"- **Likely question:** {item['likely_question']}",
+                f"- **Situation:** {item['situation']}",
+                f"- **Task:** {item['task']}",
+                f"- **Action:** {item['action']}",
+                f"- **Result:** {item['result']}",
+                f"- **Evidence:** master lines "
+                f"{', '.join(str(e['line']) for e in item['evidence_lines'])}", ""]
+    out += ["---", "", f"_{briefing['note']}_", ""]
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
 # Resume stage
 # ---------------------------------------------------------------------------
 def _selection_report(plan: ResumePlan, removed_units: set[tuple]) -> list[dict[str, Any]]:
@@ -3900,15 +4718,65 @@ def _rejections(plan: ResumePlan) -> list[dict[str, Any]]:
     return result
 
 
+def build_gates(fit: FitResult | None, ats: AtsCheck | None) -> dict[str, Any]:
+    """The three proof-of-build gates; a later gate runs only after the earlier ones pass."""
+    def state(passed: bool | None) -> str:
+        return "not_run" if passed is None else ("passed" if passed else "failed")
+
+    result = fit.compile_result if fit else None
+    log = result.log_text if result else ""
+    syntax = None if result is None else result.ok
+    check = fit.check if fit else None
+    single = None if not syntax or check is None else (check.ok and check.pages == 1)
+    return {
+        "gate_1_syntax": {
+            "status": state(syntax),
+            "returncode": result.returncode if result else None,
+            "fatal_errors": [collapse_ws(l)[:200] for l in fatal_log_lines(log)][:5],
+            "overfull_boxes": len(re.findall(r"^Overfull \\[hv]box", log, re.MULTILINE)),
+            "detail": result.error if result is not None and not result.ok else "",
+        },
+        "gate_2_single_page": {
+            "status": state(single),
+            "pdfinfo_pages": check.pdfinfo_pages if check else None,
+            "form_feed_pages": check.pdftotext_pages if check else None,
+            "compile_iterations": fit.iterations if fit else 0,
+            "units_trimmed": len(fit.removed) if fit else 0,
+            "spacing_level": fit.spacing_level if fit else 0,
+        },
+        "gate_3_ats_readability": ({"status": "not_run"} if ats is None else
+                                   {"status": state(ats.ok), **dataclasses.asdict(ats)}),
+    }
+
+
+def _write_companion(outputs_dir: Path, name: str, text: str) -> str:
+    path = safe_output_path(outputs_dir, name)
+    atomic_write_text(path, text)
+    return path.name
+
+
 def produce_resume(analysis: Analysis, template: ParsedTemplate, outputs_dir: Path, base: str,
                    tools: ToolSet, dry_run: bool,
-                   runner: Callable[..., subprocess.CompletedProcess] = subprocess.run
-                   ) -> tuple[dict[str, Any], int]:
+                   runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+                   debug_proof: bool = False) -> tuple[dict[str, Any], int]:
     """Plan, render, compile and verify the resume; returns (resume block, exit code)."""
     plan = build_resume_plan(template, analysis.master, analysis)
+    # Hard gate: raises before anything is written when a claim is untraceable.
+    provenance = build_provenance(plan, analysis.master, set())
     names = {kind: f"{base}_resume{suffix}" for kind, suffix in (
         ("tex", ".tex"), ("pdf", ".pdf"), ("log", ".log"), ("failed_tex", ".failed.tex"),
         ("failed_log", ".failed.log"), ("unverified_tex", ".unverified.tex"))}
+    proof_name = f"{base}_provenance.json"
+
+    def write_proof(removed: set[tuple]) -> dict[str, Any]:
+        """Provenance of exactly what was rendered; written with --debug-proof."""
+        proof = build_provenance(plan, analysis.master, removed)
+        block["provenance"].update(proof["summary"], scope="rendered resume")
+        if debug_proof:
+            block["provenance"]["file"] = _write_companion(outputs_dir, proof_name,
+                                                           dump_json(proof))
+            block["files"]["provenance"] = proof_name
+        return proof
     block: dict[str, Any] = {
         "generated": False,
         "status": "planned",
@@ -3922,6 +4790,9 @@ def produce_resume(analysis: Analysis, template: ParsedTemplate, outputs_dir: Pa
         "rejected_template_bullets": _rejections(plan),
         "template_items_removed": plan.template_items_removed,
         "warnings": plan.warnings,
+        "provenance": {**provenance["summary"], "scope": "all candidate content (pre-fit)",
+                       "file": None},
+        "build_gates": build_gates(None, None),
         "files": {},
     }
     if dry_run:
@@ -3934,6 +4805,7 @@ def produce_resume(analysis: Analysis, template: ParsedTemplate, outputs_dir: Pa
         target = names["unverified_tex"] if keep_valid else names["tex"]
         path = safe_output_path(outputs_dir, target)
         atomic_write_text(path, tex)
+        write_proof(set())
         block.update(generated=True, status="not_compiled", tex_sha256=sha256_text(tex))
         block["files"]["tex"] = path.name
         block["reason"] = (f"No compatible LaTeX engine: the template needs "
@@ -3976,6 +4848,13 @@ def produce_resume(analysis: Analysis, template: ParsedTemplate, outputs_dir: Pa
                                "re-check: " + "; ".join(final_check.reasons)]
             block["verification"] = dataclasses.asdict(final_check)
             block["page_count"] = final_check.pages
+    ats: AtsCheck | None = None
+    if fit.ok and fit.compile_result is not None:
+        ats = ats_readability_check(fit.compile_result.pdf_path, tools, plan, removed_units,
+                                    runner)
+    block["build_gates"] = build_gates(fit, ats)
+    if ats is not None and not ats.ok:
+        fit.ok = False
     if fit.ok and fit.compile_result is not None:
         tex_path = safe_output_path(outputs_dir, names["tex"])
         pdf_path = safe_output_path(outputs_dir, names["pdf"])
@@ -3995,6 +4874,11 @@ def produce_resume(analysis: Analysis, template: ParsedTemplate, outputs_dir: Pa
         block.update(status="verified", single_page_verified=True,
                      pdf_sha256=file_sha256(pdf_path))
         block["files"] = {"tex": tex_path.name, "pdf": pdf_path.name, "log": log_path.name}
+        briefing = build_briefing(analysis, write_proof(removed_units), pdf_path.name)
+        block["files"]["briefing_json"] = _write_companion(
+            outputs_dir, f"{base}_briefing.json", dump_json(briefing))
+        block["files"]["briefing_md"] = _write_companion(
+            outputs_dir, f"{base}_briefing.md", render_briefing_markdown(briefing))
         return block, EXIT_OK
     tex_name = names["failed_tex"] if keep_valid else names["tex"]
     log_name = names["failed_log"] if keep_valid else names["log"]
@@ -4007,6 +4891,11 @@ def produce_resume(analysis: Analysis, template: ParsedTemplate, outputs_dir: Pa
         block["files"]["log"] = log_path.name
     block["files"]["build_dir"] = str(build_dir)
     block["last_valid_pdf_kept"] = keep_valid
+    write_proof(removed_units)
+    if ats is not None and not ats.ok:
+        block["status"] = "ats_check_failed"
+        block["reason"] = "Gate 3 (ATS readability) failed: " + "; ".join(ats.reasons)
+        return block, EXIT_FAILED
     if fit.compile_result is not None and not fit.compile_result.ok:
         block["status"] = "compile_failed"
         block["reason"] = fit.compile_result.error
@@ -4043,7 +4932,8 @@ def build_parser() -> argparse.ArgumentParser:
                      "Reads the master profile as the only source of career facts."),
         epilog=("Exit codes: 0 verified resume (or dry-run PROCEED), 2 invalid input, "
                 "3 REJECT - LOW FIT, 4 missing prerequisite (master, template, LaTeX engine), "
-                "5 analysis/compilation/output failure, 6 could not fit exactly one page."))
+                "5 analysis/compilation/output failure (including an untraceable claim or a "
+                "failed ATS gate), 6 could not fit exactly one page."))
     parser.add_argument("job_description", type=Path,
                         help="path to a .md or .txt job description (e.g. target_jobs/x.md)")
     parser.add_argument("--verbose", action="store_true",
@@ -4064,6 +4954,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--override-low-fit", action="store_true",
                         help="explicitly build a resume even when the verdict is "
                              "REJECT - LOW FIT (the verdict itself is unchanged)")
+    parser.add_argument("--debug-proof", action="store_true",
+                        help="also write <base>_provenance.json mapping every rendered claim "
+                             "to its master lines, tags and repo links")
+    parser.add_argument("--analyze-gap", action="store_true",
+                        help="write <base>_gap_analysis.json even when the verdict is PROCEED "
+                             f"(always written below {FIT_THRESHOLD})")
     return parser
 
 
@@ -4098,7 +4994,7 @@ def run(argv: Sequence[str] | None = None, *,
         exit_code = EXIT_OK if analysis.verdict == VERDICT_PROCEED else EXIT_LOW_FIT
         if analysis.verdict == VERDICT_PROCEED or args.override_low_fit:
             resume, resume_code = produce_resume(analysis, template, outputs_dir, base, tools,
-                                                 args.dry_run, runner)
+                                                 args.dry_run, runner, args.debug_proof)
             resume["override_low_fit"] = bool(args.override_low_fit
                                               and analysis.verdict != VERDICT_PROCEED)
             report["resume"] = resume
@@ -4109,10 +5005,17 @@ def run(argv: Sequence[str] | None = None, *,
                                 "reason": f"fit_score {analysis.score} < {FIT_THRESHOLD}; no "
                                           f"resume is generated without --override-low-fit",
                                 "tools": tools.describe()}
+        gap = None
+        if analysis.verdict != VERDICT_PROCEED or args.analyze_gap:
+            gap = build_gap_analysis(analysis, "--analyze-gap" if args.analyze_gap
+                                     else "below_threshold")
+            if not args.dry_run:
+                report["gap_analysis"] = _write_companion(
+                    outputs_dir, f"{base}_gap_analysis.json", dump_json(gap))
         if not args.dry_run:
             report_path = safe_output_path(outputs_dir, f"{base}_analysis.json")
             atomic_write_text(report_path, dump_json(report))
-        print_summary(report, outputs_dir, args.verbose, args.dry_run, out)
+        print_summary(report, outputs_dir, args.verbose, args.dry_run, out, gap)
         return exit_code
     except PipelineError as exc:
         out(f"ERROR: {exc}")
@@ -4120,7 +5023,7 @@ def run(argv: Sequence[str] | None = None, *,
 
 
 def print_summary(report: dict[str, Any], outputs_dir: Path, verbose: bool, dry_run: bool,
-                  out: Callable[[str], None]) -> None:
+                  out: Callable[[str], None], gap: dict[str, Any] | None = None) -> None:
     cov = report["evidence_coverage"]
     out(f"{report['company']} | {report['role']}")
     out(f"Fit score: {report['fit_score']} -> {report['verdict']}  "
@@ -4140,18 +5043,34 @@ def print_summary(report: dict[str, Any], outputs_dir: Path, verbose: bool, dry_
             out(f"  warning: {warning}")
     resume = report.get("resume", {})
     status = resume.get("status")
+    if gap is not None:
+        for item in gap["actionable_recommendations"][:3]:
+            out(f"  gap: {item['recommendation']}")
     if dry_run:
         out("Dry run: nothing written.")
+        if "provenance" in resume:
+            out(f"  provenance: {resume['provenance']['traced']}/"
+                f"{resume['provenance']['claims']} candidate claims traced to the master profile")
         for entry in resume.get("selected_content", []):
             out(f"  {entry['section']}: {entry['entry'][:60]} "
                 f"({len(entry['bullets'])} candidate bullets)")
         return
     out(f"Analysis: {outputs_dir / (report['output_base'] + '_analysis.json')}")
+    if report.get("gap_analysis"):
+        out(f"Gap analysis: {outputs_dir / report['gap_analysis']}")
+    gates = resume.get("build_gates")
+    if gates and gates["gate_1_syntax"]["status"] != "not_run":
+        out("Build gates: " + ", ".join(f"{name.split('_', 2)[2].replace('_', ' ')} "
+                                        f"{gate['status']}" for name, gate in gates.items()))
     if status == "verified":
         files = resume["files"]
         out(f"Resume: {outputs_dir / files['pdf']} (1 page verified by "
             f"{resume['verification']['method']}; {resume['fitting']['iterations']} compile "
             f"iteration(s), spacing level {resume['fitting']['spacing_level']})")
+        out(f"Briefing: {outputs_dir / files['briefing_md']}")
+        if files.get("provenance"):
+            out(f"Provenance: {outputs_dir / files['provenance']} "
+                f"({resume['provenance']['claims']} claims traced)")
     elif status:
         out(f"Resume status: {status}" + (f" - {resume.get('reason')}" if resume.get("reason")
                                          else ""))

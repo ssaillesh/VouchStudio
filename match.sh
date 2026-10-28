@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Run the job matching pipeline on one job description.
-# Usage: ./match.sh target_jobs/devops_role.md [--verbose] [--dry-run] [...]
-# Equivalent: python3 pipeline.py target_jobs/devops_role.md
+# Usage: ./match.sh target_jobs/devops_role.md [--verbose] [--dry-run] [--debug-proof]
+#                   [--analyze-gap] [...]
+# Equivalent: python3 pipeline.py target_jobs/devops_role.md (all flags pass through)
 set -u
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: ./match.sh <job_description.md|.txt> [--verbose] [--dry-run] [--help]" >&2
+  echo "usage: ./match.sh <job_description.md|.txt> [--verbose] [--dry-run] [--debug-proof]" >&2
+  echo "                  [--analyze-gap] [--help]" >&2
   echo "       (same as: python3 pipeline.py <job_description> ...)" >&2
   exit 2
 fi

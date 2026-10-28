@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import tempfile
 import unittest
@@ -225,6 +226,87 @@ class WriterTests(unittest.TestCase):
         entry = manifest["files"][out.created[0]]
         self.assertEqual(entry["identity"], "greenhouse:1")
         self.assertEqual(entry["also_seen_at"], ["https://simplify.example/x"])
+
+
+
+class CrossRunDeduplicationTests(unittest.TestCase):
+    """The manifest's dedup_key stops a job written from one source being re-ingested."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name) / "target_jobs"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def write(self, records, dry=False):
+        return F.write_records(records, self.dir, TODAY, dry, True)
+
+    def manifest(self) -> dict:
+        return json.loads((self.dir / F.MANIFEST_NAME).read_text())["files"]
+
+    def test_key_normalizes_company_title_and_location(self):
+        key = F.dedup_key("Acme Inc.", "DevOps Engineer", "Toronto, ON")
+        self.assertEqual(key, F.dedup_key("ACME", "devops  engineer", "Toronto"))
+        self.assertEqual(key, hashlib.sha256(b"acme|devops engineer|toronto").hexdigest())
+        self.assertNotEqual(key, F.dedup_key("Acme", "DevOps Engineer", "Montreal, QC"))
+        self.assertIsNone(F.dedup_key("Acme", "DevOps Engineer", None))
+
+    def test_same_job_from_another_source_in_a_later_run_is_skipped(self):
+        first = self.write([rec()])
+        jooble = rec(source="Jooble", url="https://jooble.org/desc/123", job_id=None,
+                     description="Snippet", complete=False, location="Toronto")
+        second = self.write([jooble])
+        self.assertEqual((second.created, second.updated), ([], []))
+        self.assertEqual(second.skipped_duplicate,
+                         [f"Jooble: https://jooble.org/desc/123 (already ingested as "
+                          f"{first.created[0]})"])
+        entry = self.manifest()[first.created[0]]
+        self.assertEqual(entry["also_seen_at"], ["https://jooble.org/desc/123"])
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                         sorted([first.created[0], F.MANIFEST_NAME]))
+
+    def test_dry_run_reports_the_duplicate_without_touching_the_manifest(self):
+        self.write([rec()])
+        before = (self.dir / F.MANIFEST_NAME).read_text()
+        out = self.write([rec(source="Jobright", url="https://jobright.ai/jobs/9", job_id="9")],
+                         dry=True)
+        self.assertEqual(len(out.skipped_duplicate), 1)
+        self.assertEqual((self.dir / F.MANIFEST_NAME).read_text(), before)
+
+    def test_same_source_postings_are_kept(self):
+        self.write([rec()])
+        out = self.write([rec(url="https://job-boards.greenhouse.io/acme/jobs/2", job_id="2")])
+        self.assertEqual(len(out.created), 1)
+        self.assertEqual(out.skipped_duplicate, [])
+
+    def test_two_ats_job_ids_are_never_merged(self):
+        self.write([rec()])
+        ashby = rec(source="Ashby", job_id=None,
+                    url="https://jobs.ashbyhq.com/acme/4c385433-be83-4338-ab0b-11e9fae5402a")
+        out = self.write([ashby])
+        self.assertEqual(len(out.created), 1)
+
+    def test_full_description_is_not_dropped_for_a_partial_file(self):
+        self.write([rec(source="Jooble", url="https://jooble.org/desc/1", job_id=None,
+                        description="Snippet", complete=False)])
+        out = self.write([rec()])
+        self.assertEqual(len(out.created), 1)
+        self.assertEqual(out.skipped_duplicate, [])
+
+    def test_manifest_stores_the_key_and_backfills_old_entries(self):
+        out = self.write([rec()])
+        name = out.created[0]
+        manifest_path = self.dir / F.MANIFEST_NAME
+        data = json.loads(manifest_path.read_text())
+        expected = F.dedup_key("Acme", "DevOps Engineer", "Toronto, ON")
+        self.assertEqual(data["files"][name]["dedup_key"], expected)
+        del data["files"][name]["dedup_key"]  # a manifest written before dedup keys
+        manifest_path.write_text(json.dumps(data))
+        again = self.write([rec(source="Jooble", url="https://jooble.org/desc/7", job_id=None,
+                                description="Snippet", complete=False)])
+        self.assertEqual(len(again.skipped_duplicate), 1)
+        self.assertEqual(self.manifest()[name]["dedup_key"], expected)
 
 
 if __name__ == "__main__":

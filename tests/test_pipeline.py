@@ -518,9 +518,11 @@ class ResumeGenerationTests(WorkspaceCase):
         code, _ = self.run_cli(str(self.root / "target_jobs" / "reject.md"))
         self.assertEqual(code, P.EXIT_LOW_FIT)
         self.assertEqual(sorted(p.name for p in self.outputs.iterdir()),
-                         ["other-co_data-scientist_analysis.json"])
+                         ["other-co_data-scientist_analysis.json",
+                          "other-co_data-scientist_gap_analysis.json"])
         report = json.loads((self.outputs / "other-co_data-scientist_analysis.json").read_text())
         self.assertEqual(report["resume"]["status"], "skipped_low_fit")
+        self.assertEqual(report["gap_analysis"], "other-co_data-scientist_gap_analysis.json")
 
     def test_override_low_fit_is_explicit(self):
         code, _ = self.run_cli(str(self.root / "target_jobs" / "reject.md"),
@@ -536,6 +538,8 @@ class ResumeGenerationTests(WorkspaceCase):
         self.assertEqual(code, P.EXIT_OK)
         names = sorted(p.name for p in self.outputs.iterdir() if p.is_file())
         self.assertEqual(names, ["example-co_platform-engineer_analysis.json",
+                                 "example-co_platform-engineer_briefing.json",
+                                 "example-co_platform-engineer_briefing.md",
                                  "example-co_platform-engineer_resume.log",
                                  "example-co_platform-engineer_resume.pdf",
                                  "example-co_platform-engineer_resume.tex"])

@@ -248,6 +248,13 @@ class GreenhouseTests(unittest.TestCase):
         self.assertEqual(result.filtered, 1)   # Account Executive
         self.assertEqual(result.rejected, 1)   # no absolute_url
 
+    def test_descriptions_are_sanitized_before_admission(self):
+        data = fixture("greenhouse_jobs.json")
+        data["jobs"][0]["content"] = ("&lt;p&gt;Must have Py\u200bthon &amp;amp;amp; "
+                                      "Dock\u00ader&lt;/p&gt;")
+        result, _ = self.run_gh(data)
+        self.assertEqual(result.records[0].description, "Must have Python & Docker")
+
     def test_missing_optional_fields(self):
         result, _ = self.run_gh(fixture("greenhouse_jobs.json"))
         sre = result.records[1]

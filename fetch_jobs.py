@@ -560,6 +560,40 @@ def plain_text(source: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+INVISIBLE_CHARS = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u00ad]")
+RESIDUAL_TAG = re.compile(r"[ \t]*</?(?:p|div|span|br|li|ul|ol|strong|b|em|i|u|a|h[1-6]|table|thead|"
+                          r"tbody|tr|td|th|font|section|article|hr|img|pre|code|blockquote)"
+                          r"\b[^<>]*>[ \t]*", re.IGNORECASE)
+RESIDUAL_BLOCK_TAG = re.compile(r"^</?(?:p|div|br|li|ul|ol|h[1-6]|tr|table|section|article|hr|"
+                                r"blockquote)\b", re.IGNORECASE)
+RESIDUAL_ENTITY = re.compile(r"&(?:[a-zA-Z]{2,8}|#\d{1,6}|#x[0-9a-fA-F]{1,6});")
+
+
+def _replace_tag(match: re.Match[str]) -> str:
+    """Block tags become a line break; inline tags keep at most one space."""
+    tag = match.group(0).strip()
+    if RESIDUAL_BLOCK_TAG.match(tag):
+        return "\n"
+    return " " if match.group(0) != tag else ""
+
+
+def sanitize_description(text: str) -> str:
+    """Final hygiene pass on every description before it is written.
+
+    Source fields can still carry markup after conversion: entities escaped
+    twice, tags inside "plain" text, zero-width characters and soft hyphens
+    that split keywords (Py<ZWSP>thon). Clean text passes through unchanged.
+    """
+    if not text:
+        return ""
+    for _ in range(2):  # a second round handles '&amp;lt;p&amp;gt;'
+        text = RESIDUAL_ENTITY.sub(lambda m: html.unescape(m.group(0)), text)
+        text = RESIDUAL_TAG.sub(_replace_tag, text)
+    text = INVISIBLE_CHARS.sub("", text).replace("\u00a0", " ")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def description_from(value: str | None) -> str:
     if not value:
         return ""
@@ -632,6 +666,18 @@ def normalized_company(name: str) -> str:
 def normalized_location(location: str | None) -> str:
     first = (location or "").split(",")[0].split("|")[0].split(";")[0]
     return _norm_words(first)
+
+
+def dedup_key(company: str | None, title: str | None, location: str | None) -> str | None:
+    """SHA-256 of normalized company, title and location; None when any part is empty.
+
+    Stored in the manifest so a posting already written from one source is not
+    ingested again from another source in a later run.
+    """
+    parts = (normalized_company(company or ""), _norm_words(title), normalized_location(location))
+    if not all(parts):
+        return None
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def weak_identity(record: JobRecord) -> tuple[str, str, str]:
@@ -992,6 +1038,7 @@ class SourceResult:
 
 def _admit(result: SourceResult, record: JobRecord, ctx: RunContext,
            company: dict[str, Any] | None = None) -> None:
+    record.description = sanitize_description(record.description)
     problems = validate_record(record)
     if problems:
         result.rejected += 1
@@ -1640,8 +1687,44 @@ class WriteResult:
     unchanged: list[str] = field(default_factory=list)
     skipped_manual: list[str] = field(default_factory=list)
     skipped_modified: list[str] = field(default_factory=list)
+    skipped_duplicate: list[str] = field(default_factory=list)
     not_written: int = 0
     planned: list[str] = field(default_factory=list)
+
+
+METADATA_FIELD = re.compile(r"^\*\*(Company|Role|Location)\*\*: (.*)$", re.MULTILINE)
+
+
+def _file_dedup_key(path: Path) -> str | None:
+    """Dedup key of a generated file written before the manifest stored one."""
+    try:
+        head = path.read_text(encoding="utf-8").split("## Description", 1)[0]
+    except OSError:
+        return None
+    fields = dict(METADATA_FIELD.findall(head))
+    location = fields.get("Location")
+    return dedup_key(fields.get("Company"), fields.get("Role"),
+                     None if location == "Not specified" else location)
+
+
+def _cross_source_twin(record: JobRecord, names: Sequence[str],
+                       files: dict[str, Any]) -> str | None:
+    """A file already ingested for the same job from another source, if any.
+
+    Mirrors the in-run rule: the same source never merges, two different ATS
+    job ids never merge, and a full description is never dropped for a file
+    that only holds a partial one.
+    """
+    for name in names:
+        entry = files[name]
+        if entry.get("source") == record.source:
+            continue
+        if strong_identity(entry.get("url", "")) and strong_identity(record.url):
+            continue
+        if record.description_complete and not entry.get("description_complete"):
+            continue
+        return name
+    return None
 
 
 def write_records(records: Sequence[JobRecord], target_dir: Path, today: dt.date,
@@ -1653,6 +1736,12 @@ def write_records(records: Sequence[JobRecord], target_dir: Path, today: dt.date
     manifest = load_manifest(target_dir)
     files: dict[str, Any] = manifest["files"]
     by_identity = {entry.get("identity"): name for name, entry in sorted(files.items())}
+    by_key: dict[str, list[str]] = {}
+    for name, entry in sorted(files.items()):
+        if "dedup_key" not in entry:  # backfill entries from before dedup keys existed
+            entry["dedup_key"] = _file_dedup_key(target_dir / name)
+        if entry["dedup_key"]:
+            by_key.setdefault(entry["dedup_key"], []).append(name)
     used: set[str] = set()
     ingested = today.isoformat()
     for record in records:
@@ -1661,6 +1750,16 @@ def write_records(records: Sequence[JobRecord], target_dir: Path, today: dt.date
             continue
         identity = record.identity()
         name = by_identity.get(identity)
+        key = dedup_key(record.company, record.title, record.location)
+        twin = _cross_source_twin(record, by_key.get(key, []), files) \
+            if name is None and key else None
+        if twin is not None:
+            outcome.skipped_duplicate.append(f"{record.source}: {record.url} (already ingested "
+                                             f"as {twin})")
+            seen = files[twin].setdefault("also_seen_at", [])
+            if not dry_run and record.url != files[twin].get("url") and record.url not in seen:
+                seen.append(record.url)
+            continue
         if name is None or name in used:
             stem = base_filename(record)
             name = f"{stem}.md"
@@ -1695,10 +1794,12 @@ def write_records(records: Sequence[JobRecord], target_dir: Path, today: dt.date
             "identity": identity, "source": record.source, "url": record.url,
             "canonical_url": canonical_url(record.url), "also_seen_at": record.also_seen_at,
             "description_complete": record.description_complete,
-            "body_sha256": body_hash(text), "file_sha256": file_hash(path),
+            "body_sha256": body_hash(text), "file_sha256": file_hash(path), "dedup_key": key,
             "first_ingested": (entry or {}).get("first_ingested", ingested),
             "last_ingested": ingested, "last_seen": ingested,
         }
+        if key and name not in by_key.setdefault(key, []):
+            by_key[key].append(name)
     if not dry_run:
         manifest["files"] = dict(sorted(files.items()))
         atomic_write(target_dir / MANIFEST_NAME, json.dumps(manifest, indent=2) + "\n")
@@ -1856,11 +1957,13 @@ def build_summary(results: Sequence[SourceResult], deduped: DedupeResult, writte
             "files_unchanged": len(written.unchanged),
             "skipped_manual_files": len(written.skipped_manual),
             "skipped_hand_edited_files": len(written.skipped_modified),
+            "skipped_already_ingested_duplicates": len(written.skipped_duplicate),
             "metadata_only_not_written": written.not_written,
         },
         "files": {"created": written.created, "updated": written.updated,
                   "unchanged": written.unchanged, "skipped_manual": written.skipped_manual,
-                  "skipped_hand_edited": written.skipped_modified},
+                  "skipped_hand_edited": written.skipped_modified,
+                  "skipped_already_ingested": written.skipped_duplicate},
         "duplicates": deduped.duplicates,
         "possible_duplicates": deduped.possible,
         "notes": [redact(n) for n in notes],
@@ -1893,6 +1996,9 @@ def print_summary(summary: dict[str, Any], verbose: bool, out: Callable[[str], N
         f"{t['files_unchanged']}; skipped {t['skipped_manual_files']} hand-written and "
         f"{t['skipped_hand_edited_files']} hand-edited files; {t['partial_descriptions']} "
         f"partial descriptions")
+    if t["skipped_already_ingested_duplicates"]:
+        out(f"  skipped {t['skipped_already_ingested_duplicates']} posting(s) already ingested "
+            f"from another source (same company, title and location)")
     if summary["possible_duplicates"]:
         out(f"  {len(summary['possible_duplicates'])} group(s) look similar but were kept "
             f"separate (see possible_duplicates in outputs/fetch_summary.json)")
