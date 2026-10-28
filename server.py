@@ -9,6 +9,8 @@ so scores, gates, provenance and briefings are exactly what the CLI produces:
 
     GET  /api/meta                      tools, profile, index and the running task
     GET  /api/jobs                      filtered, sorted, paginated jobs with fit scores
+    GET  /api/resume                    which profile ranks the board (master or an upload)
+    POST /api/resume[/clear]            rank against an uploaded resume (memory only), or stop
     GET  /api/jobs/{job_id}             one job: metadata, description, latest results
     POST /api/jobs/fetch                run fetch_jobs.run as a task (streams its log)
     POST /api/jobs/upload               save a pasted or uploaded description
@@ -32,6 +34,8 @@ runs: CLAUDE.md forbids editing them during a pipeline run.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import collections
 import datetime as dt
 import hashlib
@@ -236,6 +240,11 @@ class UploadRequest(BaseModel):
     role: str | None = Field(default=None, max_length=160)
 
 
+class ResumeUpload(BaseModel):
+    filename: str = Field(max_length=200)
+    content_base64: str = Field(max_length=MAX_BODY_BYTES)
+
+
 class TailorRequest(BaseModel):
     override_low_fit: bool = False
     strict_no: bool = False
@@ -331,7 +340,11 @@ class Studio:
         self.tasks: dict[str, Task] = {}
         self.active: Task | None = None
         self._index: dict[str, Any] | None = None
-        self._scores: tuple[tuple, dict[str, dict[str, Any]], dict[str, Any]] | None = None
+        # Board scores per source ("master", "upload"): (key, rows, profile summary).
+        self._scores: dict[str, tuple[tuple, dict[str, dict[str, Any]], dict[str, Any]]] | None \
+            = None
+        # A resume uploaded to rank the board: parsed in memory, never written or logged.
+        self.uploaded: tuple[str, jobboard.Profile] | None = None
 
     # -- paths ---------------------------------------------------------------
     def master_path(self) -> Path:
@@ -366,27 +379,66 @@ class Studio:
             self._scores = None
         return index
 
-    def scores(self) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
-        """Board scores for the current master profile, cached per profile and index."""
+    def scores(self, use_upload: bool = True) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+        """Board scores for the uploaded resume (when there is one and `use_upload`), else
+        the master profile; cached per profile and index. Tailoring always uses the master."""
         index = self.index()
-        try:
-            master = self.master_path()
-            data = master.read_bytes()
-        except (pipeline.PipelineError, OSError) as exc:
-            return {}, {"error": str(exc)}
-        key = (_sha(data), id(index), len(index["jobs"]))
+        uploaded = self.uploaded if use_upload else None
+        if uploaded is not None:
+            key: tuple = ("upload", uploaded[0], id(index), len(index["jobs"]))
+            profile = uploaded[1]
+        else:
+            try:
+                master = self.master_path()
+                data = master.read_bytes()
+            except (pipeline.PipelineError, OSError) as exc:
+                return {}, {"error": str(exc), "source": "master"}
+            key = ("master", _sha(data), id(index), len(index["jobs"]))
+            profile = None
+        source = key[0]
         with self.lock:
-            if self._scores and self._scores[0] == key:
-                return self._scores[1], self._scores[2]
-        try:
-            profile = jobboard.load_profile(master.name, data)
-        except jobboard.ProfileError as exc:
-            return {}, {"error": str(exc)}
+            cached = (self._scores or {}).get(source)
+            if cached and cached[0] == key:
+                return cached[1], cached[2]
+        if profile is None:
+            try:
+                profile = jobboard.load_profile(master.name, data)
+            except jobboard.ProfileError as exc:
+                return {}, {"error": str(exc), "source": "master"}
         rows = {row["id"]: row for row in jobboard.score_jobs(profile, index["jobs"])}
-        summary = profile.summary()
+        summary = {**profile.summary(), "source": "upload" if uploaded else "master"}
         with self.lock:
-            self._scores = (key, rows, summary)
+            self._scores = {**(self._scores or {}), source: (key, rows, summary)}
         return rows, summary
+
+    def set_resume(self, body: ResumeUpload) -> dict[str, Any]:
+        """Rank the board against an uploaded resume or master profile (memory only)."""
+        try:
+            data = base64.b64decode(body.content_base64, validate=True)
+        except (ValueError, binascii.Error):
+            raise HTTPException(422, "The upload is not valid base64") from None
+        try:
+            profile = jobboard.load_profile(body.filename, data)
+        except jobboard.ProfileError as exc:
+            raise HTTPException(422, str(exc)) from None
+        with self.lock:
+            self.uploaded = (_sha(data), profile)
+            self._scores = None
+        return self.resume_state()
+
+    def clear_resume(self) -> dict[str, Any]:
+        with self.lock:
+            self.uploaded = None
+            self._scores = None
+        return self.resume_state()
+
+    def resume_state(self) -> dict[str, Any]:
+        scores, profile = self.scores()
+        ranked = [s for s in scores.values() if not s["insufficient"]]
+        return {"profile": profile, "threshold": pipeline.FIT_THRESHOLD,
+                "scored": len(ranked),
+                "proceed": sum(1 for s in ranked if s["score"] >= pipeline.FIT_THRESHOLD),
+                "thin": sum(1 for s in scores.values() if s["insufficient"])}
 
     def outputs_by_job(self) -> dict[str, dict[str, Any]]:
         """Latest analysis per job description, keyed by its workspace-relative path."""
@@ -425,6 +477,7 @@ class Studio:
         scores, profile = self.scores()
         outputs = self.outputs_by_job()
         needle = q.casefold().strip()
+        levels = {name for name in level.split(",") if name}  # one level or several
         rows = []
         facets: dict[str, collections.Counter] = {k: collections.Counter() for k in
                                                   ("region", "level", "source", "verdict")}
@@ -435,18 +488,23 @@ class Studio:
             view["rank"] = score["rank"] if score else None
             view["verdict"] = score["verdict"] if score else None
             view["insufficient"] = bool(score and score["insufficient"])
+            view["matched"] = (score.get("matched") or [])[:8] if score else []
+            view["gaps"] = (score.get("gaps") or [])[:6] if score else []
+            view["requirement_count"] = score["requirements"] if score else None
             view["file"] = job["file"]
             out = outputs.get(f"target_jobs/{job['file']}")
             view["tailored"] = out
             view["verdict_key"] = ("proceed" if view["verdict"] == pipeline.VERDICT_PROCEED else
-                                   "low_fit" if view["verdict"] else "unscored")
+                                   "low_fit" if view["verdict"] else
+                                   "thin" if view["insufficient"] else
+                                   "listing" if not view["complete"] else "unscored")
             for key, value in (("region", view["region"]), ("level", view["level"]),
                                ("source", view["source"]), ("verdict", view["verdict_key"])):
                 facets[key][value] += 1
             if needle and needle not in " ".join(
                     str(view[k] or "") for k in ("title", "company", "location", "id")).casefold():
                 continue
-            if (region and view["region"] != region) or (level and view["level"] != level) \
+            if (region and view["region"] != region) or (levels and view["level"] not in levels) \
                     or (source and view["source"] != source) \
                     or (verdict and view["verdict_key"] != verdict) or (tailored and not out):
                 continue
@@ -475,7 +533,7 @@ class Studio:
         path = self.job_path(job_id)
         job = next((j for j in self.index()["jobs"] if j["id"] == job_id), None)
         view = jobboard.public_job(job) if job else {"id": job_id, "title": job_id}
-        scores, _profile = self.scores()
+        scores, _profile = self.scores(use_upload=False)  # the skill gate tailoring uses
         view["board_score"] = scores.get(job_id)
         view["file"] = path.name
         view["text"] = path.read_text(encoding="utf-8", errors="replace")
@@ -767,6 +825,8 @@ class Studio:
                 "index_generated": index.get("generated"), "tools": tools,
                 "master": master, "template": self.template_path().name,
                 "threshold": pipeline.FIT_THRESHOLD, "fetch_sources": list(FETCH_SOURCES),
+                "levels": list(jobboard.LEVELS),
+                "min_skill_requirements": jobboard.MIN_SKILL_REQUIREMENTS,
                 "active_task": active.view(False) if active else None}
 
 
@@ -860,6 +920,8 @@ def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
             response.headers["Content-Security-Policy"] = CSP  # PDF viewers need none
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"  # revalidate: a UI edit shows at once
         return response
 
     @app.exception_handler(Busy)
@@ -881,6 +943,18 @@ def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
              offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=PAGE_SIZE_MAX)):
         return studio.list_jobs(q, region, level, source, verdict, tailored, min_score, sort,
                                 offset, limit)
+
+    @app.get("/api/resume")
+    def resume():
+        return studio.resume_state()
+
+    @app.post("/api/resume")
+    def set_resume(body: ResumeUpload):
+        return studio.set_resume(body)
+
+    @app.post("/api/resume/clear")
+    def clear_resume():
+        return studio.clear_resume()
 
     @app.post("/api/jobs/fetch", status_code=202)
     def fetch(body: FetchRequest):

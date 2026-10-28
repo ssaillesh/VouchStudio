@@ -32,6 +32,27 @@ function append(el, ...kids) {
   return el;
 }
 
+/** Small stroked SVG icons (bold weight, one stroke width), built without markup strings. */
+const ICON_PATHS = {
+  external: ['M8 16 16 8', 'M9.5 8H16v6.5'],
+  check: ['M5 12.5 9.5 17 19 7.5'],
+  cross: ['M7 7l10 10', 'M17 7 7 17'],
+  arrow: ['M5 12h14', 'M13 6l6 6-6 6'],
+};
+function icon(name, size = 13) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', width: size, height: size, fill: 'none',
+    stroke: 'currentColor', 'stroke-width': 2.25, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    'aria-hidden': 'true', class: 'icon' })) svg.setAttribute(k, String(v));
+  for (const d of ICON_PATHS[name]) {
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 function clear(el, ...kids) { el.replaceChildren(); return append(el, ...kids); }
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -86,18 +107,20 @@ const STATUS_CHIP = {
 };
 const statusLabel = (s) => String(s || '').replace(/_/g, ' ');
 const chip = (text, kind = '') => h('span', { class: `chip ${kind}` }, text);
-const statusChip = (status) => chip(statusLabel(status), STATUS_CHIP[status] ?? '');
+const statusChip = (status) => chip(statusLabel(status), `tag ${STATUS_CHIP[status] ?? ''}`);
 
 function lineChip(n, label) {
   return h('a', { class: 'chip link accent', href: `#/profile?line=${n}`, title: 'Open in Profile Studio' },
     label || `L${n}`);
 }
 
-function scoreBadge(job) {
-  if (job.insufficient) return h('span', { class: 'score thin', title: 'Fewer than 3 recognized skill requirements' }, 'thin');
-  if (job.score == null) return h('span', { class: 'score', title: 'No full description to score' }, '–');
+function scoreBadge(job, inline = false) {
+  const cls = inline ? ' inline' : '';
+  if (job.insufficient) return h('span', { class: `score thin${cls}`, title: 'Fewer than 3 recognized skill requirements' }, 'Too little detail');
+  if (job.score == null) return h('span', { class: `score thin${cls}`, title: 'No full description to score' }, job.complete === false ? 'Listing' : 'Not scored');
   const kind = job.score >= state.threshold ? 'proceed' : job.score >= 40 ? 'mid' : '';
-  return h('span', { class: `score ${kind}` }, job.score);
+  return h('span', { class: `score ${kind}${cls}` }, job.score,
+    !inline && job.requirement_count != null ? h('small', {}, `${job.requirement_count} req${job.requirement_count === 1 ? '' : 's'}`) : null);
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +129,8 @@ function scoreBadge(job) {
 const state = {
   meta: null,
   threshold: 65,
-  jobsQuery: { q: '', region: '', level: '', source: '', verdict: '', sort: 'match', tailored: false },
+  jobsQuery: { q: '', region: '', levels: [], source: '', verdict: '', sort: 'match', tailored: false },
+  resume: null,           // { profile, threshold, scored, proceed, thin } from /api/resume
   jobsPage: { offset: 0, rows: [] },
   lastJob: null,
   editor: null,           // { kind, text, sha, dirty }
@@ -141,11 +165,15 @@ async function route() {
     if (nav === 'job' && state.lastJob) a.href = `#/job/${encodeURIComponent(state.lastJob)}`;
   });
   const view = $('#view');
+  document.body.dataset.view = name;
+  window.scrollTo(0, 0);
   try {
     if (name === 'job') {
       const id = args[0] || state.lastJob;
       if (!id) { clear(view, emptyState('Pick a job first', 'Open a job from the Jobs list to tailor it.')); return; }
       await renderWorkspace(view, id, args[1] || 'fit');
+    } else if (name === 'resume') {
+      await renderResume(view);
     } else if (name === 'profile' || name === 'template') {
       await renderStudio(view, name, Number(params.get('line')) || null);
     } else {
@@ -165,7 +193,8 @@ async function loadMeta() {
   state.threshold = state.meta.threshold;
   const tools = $('#tools');
   clear(tools, ['pdflatex', 'pdftotext', 'pdfinfo'].map((name) =>
-    chip(`${state.meta.tools[name] ? '✓' : '✗'} ${name}`, state.meta.tools[name] ? 'pass' : 'fail')));
+    h('span', { class: `chip ${state.meta.tools[name] ? 'pass' : 'fail'}` },
+      icon(state.meta.tools[name] ? 'check' : 'cross', 11), name)));
   const active = state.meta.active_task;
   if (active && active.status === 'running') showTaskPill(active);
 }
@@ -223,23 +252,43 @@ function consoleClass(line) {
 }
 
 // ---------------------------------------------------------------------------
-// Jobs view
+// Jobs view: the board (stats, filters, every job) ranked against one profile
 // ---------------------------------------------------------------------------
 const LEVELS = ['Intern', 'New grad', 'Junior', 'Mid or unspecified', 'Senior', 'Staff and principal',
   'Manager', 'Director and above'];
+const GAP_LABEL = { explicitly_no: 'no', not_evidenced: 'missing', ambiguous: 'unclear' };
+
+const revealer = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (entry.isIntersecting) { entry.target.classList.add('in'); revealer.unobserve(entry.target); }
+  }
+}, { rootMargin: '0px 0px -40px 0px' }) : null;
+
+/** Fade a block in as it enters the viewport; `index` staggers siblings. */
+function reveal(node, index = 0) {
+  node.classList.add('reveal');
+  node.style.setProperty('--index', String(Math.min(index, 8)));
+  if (revealer) revealer.observe(node); else node.classList.add('in');
+  return node;
+}
+
+function profileLine(profile) {
+  if (!profile) return 'Loading the profile…';
+  if (profile.error) return `Profile problem: ${profile.error}`;
+  const mode = profile.mode === 'master' ? 'master profile' : 'plain resume';
+  return `${profile.filename} · ${mode} · ${profile.evidence_lines} evidence lines`;
+}
 
 async function renderJobs(view) {
   const query = state.jobsQuery;
-  const search = h('input', { type: 'search', placeholder: 'Search title, company, location', value: query.q,
+  const search = h('input', { type: 'search', placeholder: 'Title, company or city', value: query.q,
     'aria-label': 'Search jobs' });
-  const selects = {};
   const select = (key, label, options) => {
     const el = h('select', { 'aria-label': label },
       h('option', { value: '' }, label),
       options.map(([value, text]) => h('option', { value }, text)));
     el.value = query[key] || '';
     el.addEventListener('change', () => { query[key] = el.value; reload(); });
-    selects[key] = el;
     return el;
   };
   const sort = h('select', { 'aria-label': 'Sort' },
@@ -251,30 +300,89 @@ async function renderJobs(view) {
   tailored.checked = query.tailored;
   tailored.addEventListener('change', () => { query.tailored = tailored.checked; reload(); });
   search.addEventListener('input', debounce(() => { query.q = search.value; reload(); }, 250));
-
-  const summary = h('p', { class: 'jobs-summary' }, 'Loading jobs…');
-  const list = h('div', { class: 'panel job-list' });
-  const more = h('div', { class: 'load-more' });
   const sourceSelect = select('source', 'All sources', []);
+
+  const banner = h('div', { class: 'banner' });
+  const bento = h('div', { class: 'bento' });
+  const levelRow = h('div', { class: 'level-row', role: 'group', 'aria-label': 'Filter by level' });
+  const count = h('span', { class: 'count', 'aria-live': 'polite' });
+  const summary = h('p', { class: 'jobs-summary' });
+  const list = h('div', { class: 'panel job-list' }, h('div', { class: 'empty' }, 'Loading jobs…'));
+  const more = h('div', { class: 'load-more' });
+  const foot = h('footer', { class: 'foot' });
+
   clear(view,
+    reveal(h('header', { class: 'page-head' },
+      h('p', { class: 'eyebrow' }, 'Vouch · job board'),
+      h('h1', {}, 'Every open role, scored against your experience.'),
+      h('p', { class: 'lede' }, 'Browse every role and level across the US and Canada. Each job gets an ',
+        'evidence-based fit score; open one to tailor a verified one-page resume for it.'))),
+    reveal(banner, 1),
+    bento,
+    h('div', { class: 'section-head' }, h('h2', {}, 'All jobs'), count, h('span', { class: 'spacer' }),
+      h('button', { class: 'btn', type: 'button', onclick: () => openUploadDialog() }, 'Add job'),
+      h('button', { class: 'btn primary', type: 'button', onclick: () => openFetchDialog() }, 'Fetch jobs')),
     h('div', { class: 'toolbar' },
       search,
-      select('verdict', 'Any verdict', [['proceed', `PROCEED (≥ ${state.threshold})`], ['low_fit', 'Low fit'],
-        ['unscored', 'Not scored']]),
-      select('region', 'Any region', [['US', 'US'], ['Canada', 'Canada']]),
-      select('level', 'Any level', LEVELS.map((l) => [l, l])),
+      select('verdict', 'Any status', [['proceed', `At or above ${state.threshold}`], ['low_fit', 'Below threshold'],
+        ['thin', 'Not enough detail'], ['listing', 'Listing only']]),
+      select('region', 'Anywhere', [['US', 'US'], ['Canada', 'Canada']]),
       sourceSelect,
       sort,
-      h('label', { class: 'check' }, tailored, 'Tailored only'),
-      h('span', { class: 'spacer' }),
-      h('button', { class: 'btn', type: 'button', onclick: () => openUploadDialog() }, '+ Add job'),
-      h('button', { class: 'btn primary', type: 'button', onclick: () => openFetchDialog() }, 'Fetch jobs')),
-    summary, list, more);
+      h('label', { class: 'check' }, tailored, 'Tailored only')),
+    levelRow, summary, list, more, foot);
+
+  const toggleLevel = (name) => {
+    query.levels = query.levels.includes(name) ? query.levels.filter((l) => l !== name)
+      : [...query.levels, name];
+    reload();
+  };
+
+  function renderBanner(profile) {
+    const upload = profile?.source === 'upload';
+    clear(banner,
+      h('p', {}, h('span', { class: 'src' }, upload ? 'Ranked against your upload' : 'Ranked against your master profile'),
+        profileLine(profile)),
+      upload ? h('button', { class: 'btn ghost', type: 'button', onclick: async () => {
+        await clearUploadedResume(); reload();
+      } }, 'Use master profile') : null,
+      h('a', { class: 'btn', href: '#/resume' }, upload ? 'Change resume' : 'Upload a resume'));
+  }
+
+  function renderStats(data) {
+    const v = data.facets.verdict;
+    const regionCount = (name) => Object.entries(data.facets.region)
+      .filter(([r]) => r.includes(name)).reduce((sum, [, n]) => sum + n, 0);
+    const levelCounts = data.facets.level;
+    const stat = (value, label, cls, i) => reveal(h('div', { class: `card ${cls}` },
+      h('p', { class: 'stat-big' }, value), h('p', { class: 'stat-label' }, label)), i);
+    clear(bento,
+      stat(data.total.toLocaleString(), 'Jobs on the board', 'span-2', 0),
+      stat(((v.proceed || 0) + (v.low_fit || 0)).toLocaleString(),
+        `With enough detail to score (${state.meta?.min_skill_requirements || 3}+ recognized skills)`, 'span-2', 1),
+      stat((v.proceed || 0).toLocaleString(), `At or above the ${state.threshold} fit threshold`, 'span-2 wide', 2),
+      reveal(h('div', { class: 'card span-3' }, h('h3', {}, 'Regions'),
+        h('div', { class: 'split' },
+          h('div', {}, h('p', { class: 'stat-big' }, regionCount('US').toLocaleString()), h('p', { class: 'stat-label' }, 'United States')),
+          h('div', {}, h('p', { class: 'stat-big' }, regionCount('Canada').toLocaleString()), h('p', { class: 'stat-label' }, 'Canada')))), 3),
+      reveal(h('div', { class: 'card span-3' }, h('h3', {}, 'Levels'),
+        h('ul', { class: 'levels' }, LEVELS.map((name) => h('li', {},
+          h('button', { type: 'button', 'aria-pressed': String(query.levels.includes(name)),
+            onclick: () => toggleLevel(name) },
+          h('span', {}, name), h('span', {}, (levelCounts[name] || 0).toLocaleString())))))), 4));
+    clear(levelRow, h('span', { class: 'label' }, 'Level'),
+      LEVELS.filter((name) => levelCounts[name]).map((name) => h('button', {
+        class: 'level-chip', type: 'button', 'aria-pressed': String(query.levels.includes(name)),
+        onclick: () => toggleLevel(name) }, name, h('span', { class: 'n' }, levelCounts[name]))),
+      query.levels.length ? h('button', { class: 'btn ghost small', type: 'button',
+        onclick: () => { query.levels = []; reload(); } }, 'Clear') : null);
+  }
 
   async function reload(append = false) {
     const offset = append ? state.jobsPage.rows.length : 0;
-    const params = new URLSearchParams({ sort: query.sort, offset, limit: 60 });
-    for (const key of ['q', 'region', 'level', 'source', 'verdict']) if (query[key]) params.set(key, query[key]);
+    const params = new URLSearchParams({ sort: query.sort, offset, limit: 40 });
+    for (const key of ['q', 'region', 'source', 'verdict']) if (query[key]) params.set(key, query[key]);
+    if (query.levels.length) params.set('level', query.levels.join(','));
     if (query.tailored) params.set('tailored', 'true');
     const data = await api(`/api/jobs?${params}`);
     state.jobsPage.rows = append ? state.jobsPage.rows.concat(data.jobs) : data.jobs;
@@ -283,49 +391,217 @@ async function renderJobs(view) {
       clear(sourceSelect, h('option', { value: '' }, 'All sources'),
         Object.entries(data.facets.source).map(([s, n]) => h('option', { value: s }, `${s} (${n})`)));
       sourceSelect.value = current;
+      renderBanner(data.profile);
+      renderStats(data);
     }
-    const profile = data.profile || {};
-    clear(summary, `${data.matching.toLocaleString()} of ${data.total.toLocaleString()} jobs`,
-      profile.error ? h('span', { class: 'chip fail' }, `Profile: ${profile.error}`)
-        : ` · scored against ${profile.filename} (${profile.mode} mode, ${profile.evidence_lines} evidence lines)`,
-      ` · ${data.facets.verdict.proceed || 0} PROCEED`);
+    count.textContent = `${state.jobsPage.rows.length.toLocaleString()} of ${data.matching.toLocaleString()} shown`;
+    clear(summary, data.profile?.error ? chip(`Profile: ${data.profile.error}`, 'fail') : null);
     renderRows(list, state.jobsPage.rows, append);
     clear(more, state.jobsPage.rows.length < data.matching
       ? h('button', { class: 'btn', type: 'button', onclick: () => reload(true) },
-        `Load more (${data.matching - state.jobsPage.rows.length} left)`)
+        `Show more (${(data.matching - state.jobsPage.rows.length).toLocaleString()} left)`)
       : null);
+    clear(foot, h('span', {}, `Index built ${String(data.index_generated || '').replace('T', ' ')} · ${data.total.toLocaleString()} jobs`),
+      h('span', {}, 'Fetch jobs adds new postings and refreshes the index'));
   }
   state.reloadJobs = reload;
   await reload();
 }
 
+function regionChip(region) {
+  return chip(region, region.includes('US') ? 'accent tag' : region.includes('Canada') ? 'warn tag' : 'tag');
+}
+
 function renderRows(list, rows, keepScroll) {
-  const head = h('div', { class: 'job-row job-head-row' },
-    h('span', { title: 'Skill-coverage gate: the share of named skills your profile evidences' }, 'Gate'),
-    h('span', {}, 'Role'), h('span', {}, 'Location'), h('span', {}, 'Source'),
-    h('span', {}, 'Level'), h('span', {}, 'Resume'));
   if (!rows.length) {
-    clear(list, head, emptyState('No jobs match', 'Clear a filter, or fetch new postings.'));
+    clear(list, emptyState('No jobs match these filters', 'Clear a filter, or fetch new postings.'));
     return;
   }
   const scrollY = window.scrollY;
-  clear(list, head, rows.map((job) => {
+  clear(list, rows.map((job, i) => {
     const open = () => { location.hash = `#/job/${encodeURIComponent(job.id)}`; };
-    const tailored = job.tailored;
-    return h('div', { class: 'job-row', role: 'link', tabindex: 0, onclick: open,
+    const scored = job.score != null && !job.insufficient;
+    const pass = scored && job.score >= state.threshold;
+    const tags = h('div', { class: 'tags' },
+      scored ? chip(pass ? `${state.threshold}+` : `Below ${state.threshold}`, `${pass ? 'pass' : 'fail'} tag`)
+        : job.insufficient ? chip('Not enough detail', 'tag') : !job.complete ? chip('Listing only', 'tag') : null,
+      job.region ? regionChip(job.region) : null, chip(job.level, 'tag'), chip(job.source, 'tag'));
+    let detail = null;
+    if (scored) {
+      const matched = job.matched.map((m) => h('span', { class: 'chip pass', title: m }, h('span', { class: 'clip' }, m)));
+      const gaps = job.gaps.map(([name, status]) => h('span', { class: `chip ${status === 'explicitly_no' ? 'fail' : ''}`, title: name },
+        h('span', { class: 'clip' }, name), h('em', {}, GAP_LABEL[status] || status)));
+      detail = h('div', { class: 'detail' },
+        h('div', {}, h('h4', {}, 'Evidence matched'), h('div', { class: 'chips' }, matched.length ? matched : h('span', { class: 'faint small' }, 'None'))),
+        h('div', {}, h('h4', {}, 'Gaps'), h('div', { class: 'chips' }, gaps.length ? gaps : h('span', { class: 'faint small' }, 'None'))));
+    } else if (job.insufficient) {
+      detail = h('p', { class: 'faint small', style: { margin: '10px 0 0' } },
+        `Only ${job.skill_requirements} recognized skill requirement${job.skill_requirements === 1 ? '' : 's'}; a score needs ${state.meta?.min_skill_requirements || 3}. Read the posting to judge fit.`);
+    } else if (!job.complete) {
+      detail = h('p', { class: 'faint small', style: { margin: '10px 0 0' } },
+        'This source lists the job without a description, so it cannot be scored.');
+    }
+    const t = job.tailored;
+    const posting = safeUrl(job.url);
+    return reveal(h('article', { class: 'job-row', role: 'link', tabindex: 0, onclick: open,
       onkeydown: (e) => { if (e.key === 'Enter') open(); } },
     scoreBadge(job),
-    h('div', { class: 'grow' }, h('div', { class: 'title' }, job.title),
-      h('div', { class: 'sub' }, job.company || '—', job.domain ? ` · ${job.domain}` : '')),
-    h('div', { class: 'sub' }, job.location),
-    h('div', {}, chip(job.source)),
-    h('div', { class: 'sub' }, job.level),
-    h('div', {}, tailored
-      ? chip(tailored.resume_status === 'verified' ? '✓ Verified PDF' : statusLabel(tailored.resume_status || tailored.verdict),
-        tailored.resume_status === 'verified' ? 'pass' : tailored.verdict === 'PROCEED' ? 'warn' : '')
-      : h('span', { class: 'faint small' }, '—')));
+    h('div', { class: 'grow' },
+      h('div', { class: 'title' }, job.title),
+      h('div', { class: 'sub' }, [job.company || 'Unknown company', job.location, job.posted ? `posted ${job.posted}` : null]
+        .filter(Boolean).join(' · ')),
+      tags, detail),
+    h('div', { class: 'side-col' },
+      t ? chip(t.resume_status === 'verified' ? 'Verified PDF' : statusLabel(t.resume_status || t.verdict),
+        `tag ${t.resume_status === 'verified' ? 'pass' : t.verdict === 'PROCEED' ? 'warn' : ''}`) : null,
+      posting ? h('a', { href: posting, target: '_blank', rel: 'noopener noreferrer', class: 'small',
+        onclick: (e) => e.stopPropagation() }, 'Posting', icon('external')) : null)), i % 8);
   }));
   if (keepScroll) window.scrollTo(0, scrollY);
+}
+
+// ---------------------------------------------------------------------------
+// Your resume: rank the board against an upload (memory only) or the master
+// ---------------------------------------------------------------------------
+const RESUME_KEY = 'vouch.resume.v1';
+const MAX_REMEMBER_CHARS = 2_800_000;
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem(RESUME_KEY)); } catch { return null; } },
+  set(value) { try { localStorage.setItem(RESUME_KEY, JSON.stringify(value)); return true; } catch { return false; } },
+  clear() { try { localStorage.removeItem(RESUME_KEY); } catch { /* storage unavailable */ } },
+};
+
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+async function uploadResume(filename, contentBase64) {
+  state.resume = await api('/api/resume', { method: 'POST', body: { filename, content_base64: contentBase64 } });
+  return state.resume;
+}
+
+async function clearUploadedResume() {
+  store.clear();
+  state.resume = await api('/api/resume/clear', { method: 'POST' });
+  toast('Ranking against your master profile again');
+}
+
+/** On load, re-send a remembered upload when the server (restarted) no longer has it. */
+async function restoreResume() {
+  state.resume = await api('/api/resume');
+  const saved = store.get();
+  if (state.resume.profile?.source !== 'upload' && saved?.filename && saved?.content_base64) {
+    try { await uploadResume(saved.filename, saved.content_base64); } catch { store.clear(); }
+  }
+}
+
+async function renderResume(view) {
+  state.resume = await api('/api/resume');
+  const status = h('p', { class: 'muted small', role: 'status' });
+  const remember = h('input', { type: 'checkbox' });
+  remember.checked = Boolean(store.get()) || state.resume.profile?.source !== 'upload';
+  const fileInput = h('input', { type: 'file', accept: '.md,.txt,.pdf' });
+  const paste = h('textarea', { rows: 7, placeholder: 'Paste your resume text here' });
+  const profileCard = h('div', { class: 'card' });
+
+  const submit = async (filename, contentBase64) => {
+    status.textContent = `Scoring every job against ${filename}…`;
+    try {
+      const result = await uploadResume(filename, contentBase64);
+      if (remember.checked) {
+        const ok = contentBase64.length < MAX_REMEMBER_CHARS && store.set({ filename, content_base64: contentBase64 });
+        if (!ok) toast('Scored, but this browser could not remember the file.', 'fail');
+      } else {
+        store.clear();
+      }
+      status.textContent = `Scored ${result.scored.toLocaleString()} jobs; ${result.proceed.toLocaleString()} at or above ${result.threshold}. `
+        + `${result.thin.toLocaleString()} had too little detail to score.`;
+      renderProfile();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  };
+  const handleFile = async (file) => {
+    if (!file) return;
+    if (file.size > 2_000_000) { status.textContent = 'That file is larger than 2 MB.'; return; }
+    submit(file.name, bufferToBase64(await file.arrayBuffer()));
+  };
+  fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+  const drop = h('label', { class: 'drop' }, fileInput,
+    h('span', { class: 'drop-title' }, 'Drop a file here, or choose one'),
+    h('span', { class: 'drop-sub' }, 'Master profile (.md), plain resume (.md or .txt), or PDF. Up to 2 MB.'));
+  for (const type of ['dragenter', 'dragover']) drop.addEventListener(type, (e) => { e.preventDefault(); drop.classList.add('over'); });
+  for (const type of ['dragleave', 'drop']) drop.addEventListener(type, (e) => { e.preventDefault(); drop.classList.remove('over'); });
+  drop.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
+
+  function renderProfile() {
+    const p = state.resume.profile || {};
+    const upload = p.source === 'upload';
+    clear(profileCard,
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, upload ? 'Your upload' : 'Your master profile'),
+        chip(p.mode === 'master' ? 'Master profile' : 'Plain resume', `tag ${p.mode === 'master' ? 'pass' : 'warn'}`)),
+      h('p', { class: 'profile-file' }, p.filename || '—'),
+      h('p', { class: 'stat-label' }, `${p.evidence_lines ?? 0} evidence lines · ${(p.skills || []).length} recognized skills · `
+        + `${state.resume.proceed.toLocaleString()} jobs at or above ${state.resume.threshold}`),
+      (p.warnings || []).length ? h('div', { class: 'notice warn small' }, p.warnings.join(' ')) : null,
+      p.error ? h('div', { class: 'notice fail small' }, p.error) : null,
+      h('h3', { style: { margin: '20px 0 8px' } }, 'Skills with evidence'),
+      h('div', { class: 'row' }, (p.skills || []).length ? p.skills.map((s) => chip(s, 'pass'))
+        : h('span', { class: 'faint small' }, 'No recognized skills')),
+      (p.no_skills || []).length ? [h('h3', { style: { margin: '20px 0 8px' } }, 'Marked [NO]'),
+        h('div', { class: 'row' }, p.no_skills.map((s) => chip(s, 'fail')))] : null,
+      h('div', { class: 'row', style: { 'margin-top': '24px' } },
+        h('a', { class: 'btn primary', href: '#/jobs' }, 'See your matches'),
+        upload ? h('button', { class: 'btn ghost', type: 'button', onclick: async () => {
+          await clearUploadedResume(); renderProfile(); status.textContent = '';
+        } }, 'Forget my upload') : null),
+      h('p', { class: 'faint small', style: { margin: '16px 0 0' } },
+        'Tailoring and the skill gate in the Workspace always use your master profile.'));
+  }
+
+  const faq = (q, a) => h('details', {}, h('summary', {}, q), h('p', {}, a));
+  clear(view,
+    reveal(h('header', { class: 'page-head' },
+      h('p', { class: 'eyebrow' }, 'Vouch · your resume'),
+      h('h1', {}, 'See every job through your own evidence.'),
+      h('p', { class: 'lede' }, 'The board ranks jobs against your master profile. Upload a different resume to see how it ',
+        'would rank them instead; nothing about it is saved on the server.'))),
+    h('div', { class: 'resume-grid' },
+      reveal(h('div', { class: 'card' },
+        h('h2', {}, 'Upload'),
+        drop,
+        h('p', { class: 'or' }, 'or paste the text'),
+        paste,
+        h('div', { class: 'row', style: { 'margin-top': '12px' } },
+          h('button', { class: 'btn primary', type: 'button', onclick: () => {
+            const text = paste.value.trim();
+            if (!text) { status.textContent = 'Paste your resume text first.'; return; }
+            submit('pasted-resume.txt', bufferToBase64(new TextEncoder().encode(text)));
+          } }, 'Score pasted text'),
+          h('label', { class: 'check' }, remember, 'Remember on this device')),
+        status), 1),
+      reveal(profileCard, 2)),
+    reveal(h('section', { class: 'faq' },
+      h('h2', {}, 'How it works'),
+      faq('What the fit score means', 'Each job\'s requirements are read from its description and weighted 3 for must-haves, '
+        + '2 for required and 1 for nice-to-haves. The score is the share of that weight your profile backs with evidence. '
+        + 'It measures coverage of what the posting asks for, not your chance of being hired.'),
+      faq('Master profile versus plain resume', 'A master profile tags each line as verified or [NO], so skills you have '
+        + 'ruled out never count. A plain resume has no tags: every line counts as your own claim, which makes the score '
+        + 'less strict. The card shows which mode was used.'),
+      faq('Why some jobs say "not enough detail"', 'A score needs at least three skill requirements the parser recognizes. '
+        + 'Many sales, finance and operations postings name only a degree or terms outside the skill vocabulary, and a '
+        + 'score built on one match would be misleading, so those jobs are listed without one.'),
+      faq('Why "Best match" can differ from the score', 'Some postings yield only one or two recognizable requirements, so '
+        + 'a 100 can rest on very little. Best match discounts scores built on few requirements; the score itself is shown '
+        + 'unchanged on every job.'),
+      faq('Where your resume goes', 'It is sent to Vouch Studio on your own computer and parsed in memory. It is never '
+        + 'written to disk or logged, and it is dropped when you forget it or restart the server. With "Remember on this '
+        + 'device" checked, a copy stays in this browser so the ranking survives a restart.')), 3));
+  renderProfile();
 }
 
 // ---------------------------------------------------------------------------
@@ -486,18 +762,18 @@ async function renderWorkspace(view, jobId, tab) {
   const board = job.board_score;
   const posting = safeUrl(job.url);
   clear(view,
-    h('div', { class: 'job-header' },
+    reveal(h('div', { class: 'job-header' },
       h('div', { class: 'grow' },
         h('h1', {}, job.title),
         h('div', { class: 'meta' },
           h('span', {}, job.company || 'Unknown company'), '·', h('span', {}, job.location || ''),
           chip(job.source || 'Manual'), job.level ? chip(job.level) : null,
           job.domain ? chip(job.domain, 'accent') : null,
-          posting ? extLink(posting, 'Open posting ↗') : null,
+          posting ? h('a', { href: posting, target: '_blank', rel: 'noopener noreferrer' }, 'Open posting', icon('external')) : null,
           h('span', { class: 'mono faint' }, `target_jobs/${job.file}`))),
       board && !board.insufficient
-        ? h('div', { class: 'muted small nowrap' }, 'Skill gate ', scoreBadge(board)) : null),
-    h('div', { class: 'workspace' },
+        ? h('div', { class: 'muted small nowrap' }, 'Skill gate ', scoreBadge(board, true)) : null)),
+    reveal(h('div', { class: 'workspace' },
       h('div', { class: 'stack' },
         h('section', { class: 'panel run-panel' },
           h('div', { class: 'panel-head' }, h('h2', { class: 'grow' }, 'Tailor and build'), runButton),
@@ -513,7 +789,7 @@ async function renderWorkspace(view, jobId, tab) {
             consoleEl)),
         h('section', {}, gatesBox),
         h('section', { class: 'panel' }, tabBar, tabBody)),
-      h('aside', { class: 'side' }, pdfBox)));
+      h('aside', { class: 'side' }, pdfBox)), 1));
   ctx.refresh();
   if (job.active_task && job.active_task.status === 'running') follow(job.active_task);
 }
@@ -554,7 +830,7 @@ function renderSummary(box, ctx) {
       `${Math.round(r.role_family.confidence * 100)}% by ${r.role_family.method}`,
       r.files && r.files['report.md'] ? [' · ', h('a', {
         href: `/api/files/${encodeURIComponent(ctx.jobId)}/report.md`, target: '_blank',
-        rel: 'noopener' }, 'Run report ↗')] : null) : null)
+        rel: 'noopener' }, 'Run report', icon('external'))] : null) : null)
     : h('div', { class: 'notice small' }, 'This report predates profile and resume fit. Re-run tailoring.');
   clear(box, fitBlock, h('div', { class: 'verdict gate-line' },
     h('span', { class: `verdict-badge ${proceed ? 'proceed' : 'reject'}` }, proceed ? 'PROCEED' : 'LOW FIT'),
@@ -576,6 +852,7 @@ function renderGates(box, ctx) {
   const g1 = gates.gate_1_syntax;
   const g2 = gates.gate_2_single_page;
   const g3 = gates.gate_3_ats_readability;
+  const g4 = gates.gate_4_layout || { status: 'not_run' };
   const log = ctx.results.log || {};
   const fitting = ctx.results.resume.fitting || {};
   const card = (num, title, gate, ...body) => h('div', { class: `gate ${gate.status}` },
@@ -608,12 +885,23 @@ function renderGates(box, ctx) {
       fitting.diagnostics?.length ? h('div', { class: 'notice fail small' }, fitting.diagnostics.join(' ')) : null),
     card(3, 'ATS readability', g3,
       g3.status === 'not_run' ? h('span', { class: 'muted' }, 'Runs after gates 1 and 2 pass.') : [
-        h('div', { class: 'order' }, (g3.section_order || []).map((t, i) => [i ? h('span', { class: 'arrow' }, '→') : null,
+        h('div', { class: 'order' }, (g3.section_order || []).map((t, i) => [i ? h('span', { class: 'arrow' }, icon('arrow', 11)) : null,
           chip(t, ['Experience', 'Education', 'Projects'].includes(t) || /skill/i.test(t) ? 'accent' : '')])),
         kv('Terms checked', `${g3.terms_checked - (g3.fragmented_terms?.length || 0)} / ${g3.terms_checked} intact`),
         kv('Metrics checked', `${g3.metrics_checked - (g3.missing_metrics?.length || 0)} / ${g3.metrics_checked} intact`),
         kv('LaTeX residue', g3.latex_artifacts?.length ? g3.latex_artifacts.join(' ') : 'none'),
-        g3.reasons?.length ? h('ul', { class: 'issues' }, g3.reasons.map((r) => h('li', {}, r))) : null])));
+        g3.reasons?.length ? h('ul', { class: 'issues' }, g3.reasons.map((r) => h('li', {}, r))) : null]),
+    card(4, 'Layout', g4,
+      g4.status === 'not_run' ? h('span', { class: 'muted' }, 'Runs after gates 1 to 3 pass.') : [
+        kv('Wrapped lines', g4.wrapped?.length ?? 0),
+        kv('Overlaps', g4.overlaps?.length ?? 0),
+        kv('Blank gaps', g4.big_gaps?.length ?? 0),
+        kv('Space at bottom', g4.bottom_space_mm != null ? `${g4.bottom_space_mm} mm` : null),
+        g4.section_gaps_mm && Object.keys(g4.section_gaps_mm).length ? h('details', { class: 'more' },
+          h('summary', {}, 'Section gaps'),
+          Object.entries(g4.section_gaps_mm).map(([t, mm]) => kv(t, `${mm} mm`))) : null,
+        (g4.warnings || []).length ? h('div', { class: 'notice warn small' }, g4.warnings.join(' ')) : null,
+        g4.reasons?.length ? h('ul', { class: 'issues' }, g4.reasons.map((r) => h('li', {}, r))) : null])));
 }
 
 function renderPdf(box, ctx) {
@@ -629,7 +917,7 @@ function renderPdf(box, ctx) {
   const label = { verified: ['Verified one page', 'pass'], previous_verified: ['Previous verified build', 'warn'],
     unverified: ['Unverified', 'fail'] }[pdf.state];
   append(head, chip(label[0], label[1]),
-    h('a', { class: 'btn small', href: pdf.url, target: '_blank', rel: 'noopener' }, 'Open ↗'));
+    h('a', { class: 'btn small', href: pdf.url, target: '_blank', rel: 'noopener' }, 'Open', icon('external')));
   clear(box, head, h('iframe', { class: 'pdf-frame', src: pdf.url, title: 'Resume PDF preview' }));
 }
 
@@ -782,7 +1070,7 @@ function renderProvenance(data) {
       data.stale ? h('div', { class: 'notice warn' }, `${data.master_file} changed after this build, so line numbers may have shifted. Re-run tailoring to refresh the map.`) : null,
       h('div', { class: 'citation' },
         h('div', { class: 'row' }, chip(CLAIM_TYPES[claim.type] || claim.type, 'accent'),
-          claim.traced ? chip('✓ traced', 'pass') : chip('untraced', 'fail'),
+          claim.traced ? h('span', { class: 'chip pass' }, icon('check', 11), 'traced') : chip('untraced', 'fail'),
           claim.wording_support != null ? chip(`wording support ${Math.round(claim.wording_support * 100)}%`) : null),
         entry ? h('div', {}, h('span', { class: 'muted' }, 'Master entry: '), h('b', {}, entry.title),
           ' ', lineChip(entry.heading_line, `heading L${entry.heading_line}`)) : null,
@@ -891,12 +1179,12 @@ function renderGap(gap, results) {
         h('div', {}, rec.recommendation,
           rec.score_if_evidenced != null ? h('div', { class: 'faint small' }, `score if evidenced: ${rec.score_if_evidenced}`) : null));
     })),
-    h('p', { class: 'muted small' }, gap.policy, ' ', h('a', { href: '#/profile' }, 'Open Profile Studio →')));
+    h('p', { class: 'muted small' }, gap.policy, ' ', h('a', { href: '#/profile' }, 'Open Profile Studio', icon('arrow', 11))));
 }
 
 function renderBriefing(data) {
   const b = data.briefing;
-  if (!b) return emptyState('No briefing yet', 'The briefing is written only after a resume passes all three build gates.');
+  if (!b) return emptyState('No briefing yet', 'The briefing is written only after a resume passes all four build gates.');
   const raw = h('pre', { class: 'md-raw hidden' }, data.markdown || '');
   return h('div', { class: 'stack' },
     h('div', { class: 'row' },
@@ -1075,7 +1363,7 @@ async function renderStudio(view, kind, jumpLine) {
   });
 
   clear(view,
-    h('div', { class: 'studio' },
+    reveal(h('div', { class: 'studio' },
       h('section', { class: 'panel' },
         h('div', { class: 'panel-head' },
           h('div', { class: 'segmented' },
@@ -1086,9 +1374,9 @@ async function renderStudio(view, kind, jumpLine) {
         kind === 'profile' ? h('div', { class: 'tagbar' }, h('span', { class: 'muted small' }, 'Tag current line:'),
           TAGS.map((t) => h('button', { class: 'btn small', type: 'button', onclick: () => setTag(t) }, `[${t}]`)),
           h('button', { class: 'btn small ghost', type: 'button', onclick: () => setTag(null) }, 'Remove tag'),
-          h('span', { class: 'spacer' }), h('span', { class: 'faint small' }, '⌘S / Ctrl+S saves')) : null,
+          h('span', { class: 'spacer' }), h('span', { class: 'faint small' }, h('kbd', {}, '⌘'), h('kbd', {}, 'S'), ' or ', h('kbd', {}, 'Ctrl'), h('kbd', {}, 'S'), ' saves')) : null,
         editor),
-      side));
+      side)));
   renderSide(side, kind, source, jump);
   syncGutter();
   if (jumpLine) requestAnimationFrame(() => jump(jumpLine));
@@ -1144,6 +1432,7 @@ window.addEventListener('beforeunload', (event) => {
 document.addEventListener('DOMContentLoaded', async () => {
   wireDialogs();
   try { await loadMeta(); } catch (err) { toast(`Server unreachable: ${err.message}`, 'fail'); }
+  try { await restoreResume(); } catch { /* the board falls back to the master profile */ }
   if (!location.hash) location.hash = '#/jobs';
   else route();
 });

@@ -117,6 +117,13 @@ class SecurityTests(StudioCase):
         self.assertEqual(self.client.get("/api/meta").headers["cache-control"], "no-store")
         self.assertEqual(self.client.get("/static/studio.js").status_code, 200)
 
+    def test_page_and_assets_are_revalidated_so_ui_edits_show(self):
+        for path in ("/", "/static/studio.css", "/static/studio.js"):
+            res = self.client.get(path)
+            self.assertEqual(res.status_code, 200, path)
+            self.assertEqual(res.headers["cache-control"], "no-cache", path)
+        self.assertEqual(self.client.get("/api/meta").headers["cache-control"], "no-store")
+
     def test_oversized_body_is_refused(self):
         res = self.client.post("/api/jobs/upload", content=b"x" * (S.MAX_BODY_BYTES + 1),
                                headers=dict(HEADERS, **{"Content-Type": "application/json"}))
@@ -139,6 +146,45 @@ class JobsApiTests(StudioCase):
         self.assertEqual([j["id"] for j in proceed["jobs"]], ["proceed"])
         page = self.client.get("/api/jobs", params={"limit": 1, "offset": 1}).json()
         self.assertEqual([j["id"] for j in page["jobs"]], ["reject"])
+
+    def test_rows_carry_matches_gaps_and_several_levels_filter(self):
+        data = self.client.get("/api/jobs").json()
+        job = next(j for j in data["jobs"] if j["id"] == "proceed")
+        self.assertTrue(job["matched"])
+        self.assertEqual(job["requirement_count"], len(job["matched"]) + len(job["gaps"]))
+        levels = sorted(data["facets"]["level"])
+        both = self.client.get("/api/jobs", params={"level": ",".join(levels)}).json()
+        self.assertEqual(both["matching"], 2)
+        none = self.client.get("/api/jobs", params={"level": "Director and above"}).json()
+        self.assertEqual(none["matching"], 0)
+
+    def test_an_uploaded_resume_ranks_the_board_in_memory_only(self):
+        import base64
+        self.client.get("/api/jobs")  # builds the job index first
+        before = {p.relative_to(self.root) for p in self.root.rglob("*")}
+        resume = ("Platform engineer\n\nExperience\n- Built Python services with Docker and "
+                  "PostgreSQL for internal teams across several product groups\n- Wrote tests "
+                  "and deployment scripts that kept releases steady during busy quarters\n")
+        res = self.post("/api/resume", {"filename": "resume.txt",
+                                        "content_base64": base64.b64encode(resume.encode()).decode()})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["profile"]["source"], "upload")
+        self.assertEqual(res.json()["profile"]["mode"], "resume")
+        data = self.client.get("/api/jobs").json()
+        self.assertEqual(data["profile"]["filename"], "resume.txt")
+        detail = self.client.get("/api/jobs/proceed").json()  # the skill gate stays the master's
+        jd = P.read_job_description(self.root / "target_jobs" / "proceed.md", self.root)
+        self.assertEqual(detail["board_score"]["score"],
+                         P.analyze(jd, P.parse_master(self.root / "master.md")).score)
+        self.assertEqual({p.relative_to(self.root) for p in self.root.rglob("*")}, before)
+        cleared = self.post("/api/resume/clear", {}).json()
+        self.assertEqual(cleared["profile"]["source"], "master")
+        self.assertEqual(self.client.get("/api/resume").json()["profile"]["source"], "master")
+        bad = self.post("/api/resume", {"filename": "x.txt", "content_base64": "%%%"})
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(self.client.post("/api/resume", json={"filename": "x.txt",
+                                                               "content_base64": "eA=="}).status_code,
+                         403)  # no X-Vouch-Studio header
 
     def test_board_score_equals_the_pipeline_score(self):
         jd = P.read_job_description(self.root / "target_jobs" / "proceed.md", self.root)

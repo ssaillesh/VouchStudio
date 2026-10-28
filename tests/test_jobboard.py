@@ -284,10 +284,14 @@ class ScoringTests(BoardCase):
         self.assertEqual(scores[0]["id"], full["id"])
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 class AppApiTests(BoardCase):
     def setUp(self):
         super().setUp()
-        shutil.copytree(ROOT / "web", self.root / "web")
         self.server = A.serve(self.root, "127.0.0.1", 0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -312,12 +316,16 @@ class AppApiTests(BoardCase):
         return self.request("/api/score", {"filename": name,
                                            "content_base64": base64.b64encode(content).decode()})
 
-    def test_static_files_and_security_headers(self):
-        status, headers, body = self.request("/")
-        self.assertEqual(status, 200)
-        self.assertIn(b"Your resume", body)
-        self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
-        for path in ("/master.md", "/../master.md", "/web/app.js", "/api/nothing"):
+    def test_root_redirects_to_studio_and_security_headers(self):
+        opener = urllib.request.build_opener(NoRedirect)
+        try:
+            opener.open(self.base + "/", timeout=30)
+            self.fail("expected a redirect")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 302)
+            self.assertEqual(exc.headers["Location"], A.STUDIO_URL)
+            self.assertIn("default-src 'self'", exc.headers["Content-Security-Policy"])
+        for path in ("/master.md", "/../master.md", "/web/app.js", "/app.js", "/api/nothing"):
             self.assertEqual(self.request(path)[0], 404, path)
 
     def test_jobs_and_meta(self):

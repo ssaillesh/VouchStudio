@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Local job board app: python3 app.py, then open http://127.0.0.1:8765
+"""Job board API: python3 app.py serves it at http://127.0.0.1:8765
 
-Serves the static front end in web/ and a small JSON API:
+The board's page now lives in Vouch Studio (./run_ui.sh, http://127.0.0.1:8000/#/jobs),
+so GET / redirects there. This server keeps the small, stateless JSON API:
 
     GET  /api/jobs      every indexed job (no requirements, no scores)
     GET  /api/meta      counts and index time
@@ -10,8 +11,7 @@ Serves the static front end in web/ and a small JSON API:
 
 The server is stateless: an uploaded resume is parsed in memory for one request
 and never written to disk or logged. That shape is what a hosted back end
-(Render, Fly, etc.) would expose later, with web/ served from Vercel. Standard
-library only.
+(Render, Fly, etc.) would expose later. Standard library only.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import argparse
 import base64
 import binascii
 import json
-import mimetypes
 import sys
 import threading
 from http import HTTPStatus
@@ -30,8 +29,7 @@ from typing import Any
 
 import jobboard
 
-WEB_FILES = {"/": "index.html", "/index.html": "index.html", "/app.css": "app.css",
-             "/app.js": "app.js"}
+STUDIO_URL = "http://127.0.0.1:8000/#/jobs"  # the one page for the board and tailoring
 MAX_BODY_BYTES = 3_000_000  # base64 of a 2 MB upload plus JSON overhead
 DRAIN_LIMIT_BYTES = 12_000_000  # beyond this, the connection is simply closed
 
@@ -54,7 +52,7 @@ class BoardState:
             return list(self.index["jobs"])
 
 
-def make_handler(state: BoardState, web_dir: Path) -> type[BaseHTTPRequestHandler]:
+def make_handler(state: BoardState) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "jobauto"
         sys_version = ""
@@ -63,8 +61,11 @@ def make_handler(state: BoardState, web_dir: Path) -> type[BaseHTTPRequestHandle
             sys.stderr.write(f"{self.command} {self.path.split('?')[0]} -> "
                              f"{args[1] if len(args) > 1 else ''}\n")
 
-        def _send(self, status: int, body: bytes, content_type: str) -> None:
+        def _send(self, status: int, body: bytes, content_type: str,
+                  location: str | None = None) -> None:
             self.send_response(status)
+            if location:
+                self.send_header("Location", location)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -90,12 +91,10 @@ def make_handler(state: BoardState, web_dir: Path) -> type[BaseHTTPRequestHandle
 
         def do_GET(self) -> None:
             path = self.path.split("?", 1)[0]
-            if path in WEB_FILES:
-                file = web_dir / WEB_FILES[path]
-                kind = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
-                self._send(HTTPStatus.OK, file.read_bytes(),
-                           f"{kind}; charset=utf-8" if kind.startswith("text/") or
-                           kind.endswith("javascript") else kind)
+            if path in ("/", "/index.html"):
+                self._send(HTTPStatus.FOUND, b"The job board is in Vouch Studio: " +
+                           STUDIO_URL.encode() + b"\n", "text/plain; charset=utf-8",
+                           location=STUDIO_URL)
             elif path == "/api/jobs":
                 self._json(HTTPStatus.OK, [jobboard.public_job(j) for j in state.jobs()])
             elif path == "/api/meta":
@@ -157,7 +156,7 @@ def make_handler(state: BoardState, web_dir: Path) -> type[BaseHTTPRequestHandle
 
 def serve(workspace: Path, host: str, port: int) -> ThreadingHTTPServer:
     state = BoardState(workspace)
-    server = ThreadingHTTPServer((host, port), make_handler(state, workspace / "web"))
+    server = ThreadingHTTPServer((host, port), make_handler(state))
     return server
 
 
@@ -170,7 +169,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     print("Loading the job index (first run indexes every job; later runs are quick)...")
     server = serve(args.workspace.resolve(), args.host, args.port)
-    print(f"Job board running at http://{args.host}:{args.port}  (Ctrl+C to stop)")
+    print(f"Job board API at http://{args.host}:{args.port}; the page is Vouch Studio "
+          f"({STUDIO_URL}). Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
