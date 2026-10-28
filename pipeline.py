@@ -41,7 +41,7 @@ import tempfile
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Sequence
 
 try:
     import resume_kit
@@ -3225,7 +3225,8 @@ CONCEPTS += (
               r"analytical (?:work|lifecycle|frameworks?)"],
              [r"analy[sz](?:is|es|ed|ing|e)", r"insights?", r"projected \$", r"modell?ed",
               r"auditing"],
-             exclude=[r"data analyst"], supersedes=("data_analysis",)),
+             exclude=[r"data analyst"], jd_exclude=[r"data analysts?\b"],
+             supersedes=("data_analysis",)),
     _concept("metrics_tracking", "Tracking performance and user metrics",
              "KPI dashboards|metrics|DAU and MAU|performance monitoring",
              [r"performance metrics", r"kpis?", r"metrics", r"user behaviou?r", r"engagement",
@@ -3320,7 +3321,7 @@ class HardRequirement:
                               # work_authorization | start_date
     text: str
     jd_line: int
-    status: str               # met | not_met | unknown
+    status: str               # met | not_met | unknown | eligible (clearance not held)
     detail: str
     lines: list[int] = field(default_factory=list)
     affects_fit: bool = True  # work authorization is a separate note: it never caps the fit
@@ -3620,9 +3621,11 @@ def _hard_requirements(jd: JobDescription, master: MasterProfile, region: str,
                     detail = ("US security clearance requires US citizenship, which the master "
                               "profile does not record: not obtainable.")
                 elif canadian and willing is not None and region.startswith("Canada"):
-                    status, lines = "met", [citizenship.number]
+                    # Eligible and willing, but no clearance is held: flagged, never capped.
+                    status, lines = "eligible", [citizenship.number]
                     detail = (f"Canadian citizen (master line {citizenship.number}), so eligible; "
-                              f"willing to obtain clearance (resume kit line {willing[1]}).")
+                              f"willing to obtain clearance (resume kit line {willing[1]}). No "
+                              f"clearance is held yet.")
                 elif clearance is not None:
                     status, detail, lines = "unknown", (
                         f"Master line {clearance.number}: '{excerpt(_line_text(clearance), 120)}'"), \
@@ -3772,6 +3775,29 @@ def _context_requirements(jd: JobDescription, company_skills: set[str], numbered
     return found
 
 
+def _drop_restated_years(requirements: list[CoverageRequirement], years_lines: set[int],
+                         unscored: list[dict[str, Any]]) -> list[CoverageRequirement]:
+    """A years line whose every term another line also asks is only a hard requirement.
+
+    "3+ years of experience in test automation" next to "Build test automation" would score
+    one ask twice; with no other line asking for its topic, the years line stays scored.
+    """
+    def keys(req: CoverageRequirement) -> set[str]:
+        return {k for t in req.terms for k in (t.members or (t.key,))}
+    asked = set().union(*(keys(r) for r in requirements if r.jd_line not in years_lines))
+    kept: list[CoverageRequirement] = []
+    for req in requirements:
+        if req.jd_line in years_lines and keys(req) <= asked:
+            unscored.append({"jd_line": req.jd_line, "section": req.section,
+                             "text": excerpt(req.text, 200),
+                             "reason": "years of experience in a topic asked elsewhere: a hard "
+                                       "requirement"})
+            continue
+        req.id = f"R{len(kept) + 1:02d}"
+        kept.append(req)
+    return kept
+
+
 def build_coverage_model(jd: JobDescription, master: MasterProfile,
                          kit: resume_kit.ResumeKit | None = None) -> CoverageModel:
     region = job_region(jd)
@@ -3785,6 +3811,7 @@ def build_coverage_model(jd: JobDescription, master: MasterProfile,
         sections.setdefault(current, []).append(line)
     requirements: list[CoverageRequirement] = []
     unscored: list[dict[str, Any]] = []
+    years_lines: set[int] = set()
     base_type = {"mandatory": "core", "required": "core", "responsibilities": "responsibility",
                  "preferred": "preferred"}
     for heading, lines in sections.items():  # an unlabelled list of asks is a requirements list
@@ -3803,10 +3830,7 @@ def build_coverage_model(jd: JobDescription, master: MasterProfile,
                 continue
             text = strip_links(line.text)
             if PURE_YEARS_LINE.match(collapse_ws(text.lstrip("-*• "))):
-                unscored.append({"jd_line": line.number, "section": line.section_title,
-                                 "text": excerpt(text, 200),
-                                 "reason": "years of experience only: a hard requirement"})
-                continue
+                years_lines.add(line.number)
             category, _reason = _clause_category(text, 0, SECTION_DEFAULT_CATEGORY.get(
                 line.section_type, "required"))
             req_type = "preferred" if category == "preferred" else (
@@ -3822,6 +3846,7 @@ def build_coverage_model(jd: JobDescription, master: MasterProfile,
                 f"R{len(requirements) + 1:02d}", collapse_ws(text.lstrip("-*• ")), req_type,
                 REQ_TYPE_WEIGHTS[req_type], line.section_title or line.section_type,
                 line.number, terms, mode))
+    requirements = _drop_restated_years(requirements, years_lines, unscored)
     requirements += _context_requirements(jd, company_skills, len(requirements))
     model = CoverageModel(requirements, _hard_requirements(jd, master, region, kit), unscored,
                           region, work_authorization_note(master, region),
@@ -6620,13 +6645,6 @@ def select_from_kit(plan: ResumePlan, analysis: Analysis) -> None:
             KEYWORD_WEIGHT * new_words(mapped, shown_by_roles)
 
     size = min(PROJECT_LIMIT, len(candidates_by_project))
-    if os.environ.get("JOBAUTO_DEBUG_PROJECTS"):
-        for combo in itertools.combinations(sorted(candidates_by_project), size):
-            mapped = [c for k in combo for c in candidates_by_project[k]]
-            chosen = {**base, **{k: candidates_by_project[k] for k in combo}}
-            print([names[k][:10] for k in combo], round(float(set_value(combo)), 3),
-                  "cov", round(float(coverage(table_for(chosen)) - base_coverage), 3),
-                  "words", new_words(mapped, shown_by_roles))
     best_set = max(itertools.combinations(sorted(candidates_by_project), size),
                    key=lambda combo: (set_value(combo), [-k[1] for k in combo]), default=())
     total = set_value(best_set) if best_set else Fraction(0)
@@ -6877,8 +6895,7 @@ def kit_summary(plan: ResumePlan, analysis: Analysis) -> None:
     requirement of weight 2 or more is dropped. A clearance requirement adds the 9.7
     clearance line. No awards unless the job asks for them; label openers never appear.
     """
-    kit, family, model, master = analysis.kit, analysis.family, analysis.coverage, \
-        analysis.master
+    kit, family, model = analysis.kit, analysis.family, analysis.coverage
     entry = kit.summaries.get(family.code)
     if entry is None:
         plan.warnings.append(f"No 9.3 summary for {family.code}; the template summary stays")
@@ -6944,7 +6961,7 @@ def kit_required_statement(analysis: Analysis) -> str | None:
     citizenship, _clearance, _city = _master_identity(master)
     canadian = citizenship is not None and re.search(r"\bcanadian\b", _line_text(citizenship),
                                                      re.IGNORECASE)
-    if "clearance" in needs and needs["clearance"].status == "met":
+    if "clearance" in needs and needs["clearance"].status in ("met", "eligible"):
         statement = kit_clearance_statement(analysis.kit)
         if statement:
             return statement[0].rstrip(".") + "."
@@ -8315,11 +8332,16 @@ def make_wrap_probe(template: ParsedTemplate, tools: ToolSet, build_dir: Path, j
             "\n".join(body) + "\n\\end{document}\n"
         result = compile_tex(tex, build_dir / "probe", f"{jobname}_probe", tools,
                              template.path.parent.resolve(), runner)
-        return {m.group(1): 1 if float(m.group(2)) <= float(m.group(3)) or
-                int(m.group(4)) <= MAX_SHRINK_BADNESS else 2
-                for m in PROBE_MARK.finditer(result.log_text or "")}
+        return read_probe(result.log_text or "")
 
     return measure
+
+
+def read_probe(log_text: str) -> dict[str, int]:
+    """Lines per probed item from the log: 1 when it fits, or squeezes in barely."""
+    return {m.group(1): 1 if float(m.group(2)) <= float(m.group(3)) or
+            int(m.group(4)) <= MAX_SHRINK_BADNESS else 2
+            for m in PROBE_MARK.finditer(log_text)}
 
 
 @dataclass
@@ -9505,7 +9527,7 @@ def produce_resume(analysis: Analysis, template: ParsedTemplate, outputs_dir: Pa
                      not in removed]
             return float(before - after) / (header + len(shown))
     fit = fit_to_one_page(plan, tools, build_dir, jobname, template.path.parent.resolve(),
-                          runner, loss)
+                          runner, loss=loss)
     removed_units = fit.final_removed
     swaps: list[str] = []
     if fit.ok and plan.kit_mode and fit.compile_result is not None:

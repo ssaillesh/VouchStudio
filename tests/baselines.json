@@ -1,0 +1,39 @@
+{
+  "updated": "2026-10-28",
+  "fixtures": {
+    "affirm_analyst_early_career": {
+      "profile_fit": 7.7,
+      "resume_fit": 7.7,
+      "bad_outputs": {
+        "affirm_analyst_early_career": 5.2
+      }
+    },
+    "stripe_mle_growth": {
+      "profile_fit": 6.7,
+      "resume_fit": 5.5,
+      "bad_outputs": {
+        "stripe_mle_growth_v1": 3.9,
+        "stripe_mle_growth_v2": 5.5
+      }
+    },
+    "affirm_swe2_test_infra": {
+      "profile_fit": 7.8,
+      "resume_fit": 7.5,
+      "bad_outputs": {
+        "affirm_swe2_test_infra": 5.0
+      }
+    },
+    "cohere_fde_sovereign": {
+      "profile_fit": 7.7,
+      "resume_fit": 7.4,
+      "bad_outputs": {
+        "cohere_fde_sovereign": 3.9
+      }
+    },
+    "cohere_fde_agentic": {
+      "profile_fit": 7.5,
+      "resume_fit": 7.2,
+      "bad_outputs": {}
+    }
+  }
+}

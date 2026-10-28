@@ -523,9 +523,9 @@ class ResumeGenerationTests(WorkspaceCase):
         self.assertEqual(code, P.EXIT_LOW_FIT)
         self.assertEqual(sorted(p.name for p in self.outputs.iterdir()),
                          ["other-co_data-scientist_analysis.json",
-                          "other-co_data-scientist_fit_report.md",
                           "other-co_data-scientist_gap_analysis.json",
                           "other-co_data-scientist_job.json",
+                          "other-co_data-scientist_report.md",
                           "other-co_data-scientist_requirements.json"])
         report = json.loads((self.outputs / "other-co_data-scientist_analysis.json").read_text())
         self.assertEqual(report["resume"]["status"], "skipped_low_fit")
@@ -547,8 +547,8 @@ class ResumeGenerationTests(WorkspaceCase):
         self.assertEqual(names, ["example-co_platform-engineer_analysis.json",
                                  "example-co_platform-engineer_briefing.json",
                                  "example-co_platform-engineer_briefing.md",
-                                 "example-co_platform-engineer_fit_report.md",
                                  "example-co_platform-engineer_job.json",
+                                 "example-co_platform-engineer_report.md",
                                  "example-co_platform-engineer_requirements.json",
                                  "example-co_platform-engineer_resume.log",
                                  "example-co_platform-engineer_resume.pdf",
@@ -769,8 +769,8 @@ class CompileAndFitTests(WorkspaceCase):
     def test_publish_step_rechecks_the_exact_pdf(self):
         original = P.fit_to_one_page
 
-        def lying_fit(plan, tools, build_dir, jobname, texinputs, runner):
-            fit = original(plan, tools, build_dir, jobname, texinputs, runner)
+        def lying_fit(plan, tools, build_dir, jobname, texinputs, runner, **options):
+            fit = original(plan, tools, build_dir, jobname, texinputs, runner, **options)
             pdf = json.loads(fit.compile_result.pdf_path.read_text())
             pdf["pages"] = 2  # simulate the file changing after verification
             fit.compile_result.pdf_path.write_text(json.dumps(pdf))

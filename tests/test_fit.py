@@ -1,29 +1,20 @@
-"""Requirement coverage: JD parsing, evidence, profile fit, resume fit and calibration."""
+"""Requirement coverage: JD parsing, evidence, profile fit, resume fit and calibration.
+
+The real-file regression runs (bad outputs and rebuilt fixtures) are in test_regression.py.
+"""
 
 from __future__ import annotations
 
 import json
-import re
-import shutil
-import subprocess
 import unittest
 from fractions import Fraction
 from pathlib import Path
 
-from fixtures import JD_PROCEED, MASTER, TEMPLATE, FakeTex, load_pipeline
+from fixtures import JD_PROCEED, MASTER, TEMPLATE, load_pipeline
 from test_pipeline import WorkspaceCase
 
 P = load_pipeline()
 ROOT = Path(__file__).resolve().parent.parent
-REGRESSION = Path(__file__).resolve().parent / "fixtures" / "regression"
-REAL_MASTER = ROOT / "master_profile.md"
-COHERE_JD = REGRESSION / "ashby_cohere_forward_deployed_engineer_sovereign_ai.md"
-STRIPE_JD = REGRESSION / "greenhouse_stripe_machine_learning_engineer_growth_platform.md"
-COHERE_PDF = REGRESSION / "cohere_forward-deployed-engineer-sovereign-ai_resume.pdf"
-STRIPE_PDF = REGRESSION / "stripe_machine-learning-engineer-growth-platform_resume.pdf"
-AFFIRM_JD = REGRESSION / "greenhouse_affirm_software_engineer_ii_backend_test_infra_0d10ca79.md"
-STRIPE_V2_PDF = REGRESSION / "stripe_mle_v2_resume.pdf"
-AFFIRM_PDF = REGRESSION / "affirm_test_infra_resume.pdf"
 
 JD_FIT = """# Platform Engineer at Example Co
 
@@ -198,7 +189,7 @@ class RequirementParsingTests(WorkspaceCase):
               "- Knowledge of PostgreSQL\n")
         by_text = {r.text: r for r in self.model(jd).requirements}
         for text in ("Hands-on experience with Python", "3+ years of experience with Docker",
-                     "Knowledge of PostgreSQL"):
+                     "Knowledge of PostgreSQL"):  # Docker is asked nowhere else: still scored
             self.assertEqual(by_text[text].type, "core", text)
 
     def test_soft_lines_are_not_scored(self):
@@ -327,14 +318,14 @@ class FitReportTests(WorkspaceCase):
         self.assertLessEqual(fit["resume_fit"], fit["profile_fit"])
         self.assertEqual(fit["files"], {"job": f"{base}_job.json",
                                         "requirements": f"{base}_requirements.json",
-                                        "report": f"{base}_fit_report.md"})
+                                        "report": f"{base}_report.md"})
         doc = json.loads((self.outputs / f"{base}_requirements.json").read_text())
         row = doc["requirements"][0]
         for key in ("id", "text", "type", "weight", "terms", "profile_coverage",
                     "resume_coverage"):
             self.assertIn(key, row)
         self.assertIn("synonyms", row["terms"][0])
-        md = (self.outputs / f"{base}_fit_report.md").read_text()
+        md = (self.outputs / f"{base}_report.md").read_text()
         for heading in ("Profile fit", "Resume fit", "## Hard requirements", "## Requirements",
                         "## Top changes"):
             self.assertIn(heading, md)
@@ -345,7 +336,7 @@ class FitReportTests(WorkspaceCase):
         report = json.loads((self.outputs / "other-co_data-scientist_analysis.json").read_text())
         self.assertIsNone(report["fit"]["resume_fit"])
         self.assertIn("Resume fit: **n/a**",
-                      (self.outputs / "other-co_data-scientist_fit_report.md").read_text())
+                      (self.outputs / "other-co_data-scientist_report.md").read_text())
 
     def test_score_resume_prints_and_writes_nothing(self):
         self.run_cli(str(self.root / "target_jobs" / "proceed.md"))
@@ -610,228 +601,6 @@ class GenerationTests(WorkspaceCase):
         self.assertEqual([P.latex_to_plain(i) for i in asked.kv_items[(additional,
                                                                       labels["Interests"])]],
                          ["Helm"])
-
-
-HAVE_TEX = bool(shutil.which("pdflatex") and shutil.which("pdftotext"))
-
-
-@unittest.skipUnless(HAVE_REAL_BUILD := (REAL_MASTER.is_file() and HAVE_TEX and
-                                         (ROOT / "template.tex").is_file()),
-                     "real master profile, template or TeX toolchain absent")
-class RegeneratedResumesTests(unittest.TestCase):
-    """The reviewed jobs, rebuilt end to end with the real files (outputs to a temp dir).
-
-    Affirm scores below the skill-coverage gate, so it is built with --override-low-fit;
-    its exit code stays REJECT - LOW FIT.
-    """
-
-    @classmethod
-    def setUpClass(cls):
-        import tempfile
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.out = Path(cls._tmp.name)
-        cls.builds = {}
-        for name, jd, extra in (("cohere", COHERE_JD, []), ("stripe", STRIPE_JD, []),
-                                ("affirm", AFFIRM_JD, ["--override-low-fit"])):
-            lines: list[str] = []
-            code = P.run([str(jd), "--workspace", str(ROOT), "--output-dir", str(cls.out),
-                          "--master", str(REAL_MASTER), *extra], out=lines.append)
-            report = json.loads(next(path for path in cls.out.glob(f"{name}_*_analysis.json")
-                                     if not path.name.endswith("_gap_analysis.json")).read_text())
-            tex = (cls.out / report["resume"]["files"]["tex"]).read_text()
-            cls.builds[name] = (code, report, tex, lines)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
-    def summary(self, tex: str) -> str:
-        body = tex.split("\\section{Summary}", 1)[1].split("\\section{", 1)[0]
-        body = re.search(r"\\item \\small\{(.*)\}\s*\\end\{itemize\}", body, re.S).group(1)
-        return P.collapse_ws(P.latex_to_plain(body)).strip().lower()
-
-    def items(self, tex: str) -> list[str]:
-        return [P.latex_to_plain(m) for m in re.findall(r"\\resumeItem\{(.*)\}", tex)]
-
-    def skills(self, tex: str) -> dict[str, list[str]]:
-        rows = re.findall(r"\\textbf\{([^}]*)\}\{: (.*?)\}", tex)
-        return {label: [i.strip() for i in P.latex_to_plain(items).split(",")]
-                for label, items in rows}
-
-    def test_all_build_verified_one_page(self):
-        for name, (code, report, _tex, lines) in self.builds.items():
-            expected = P.EXIT_LOW_FIT if name == "affirm" else P.EXIT_OK
-            self.assertEqual(code, expected, (name, lines))
-            self.assertTrue(report["resume"]["single_page_verified"], name)
-
-    def test_every_selected_bullet_maps_to_a_requirement_when_coverage_remains(self):
-        for name, (_c, report, _t, _l) in self.builds.items():
-            check = report["fit"]["selection_check"]
-            self.assertFalse(check["violation"], (name, check))
-
-    def test_resume_fit_within_one_point_of_profile_fit(self):
-        for name, (_c, report, _t, _l) in self.builds.items():
-            fit = report["fit"]
-            self.assertGreaterEqual(fit["resume_fit"], fit["profile_fit"] - 1, name)
-            self.assertFalse(fit["underselling"], name)
-
-    def test_strongest_evidence_is_included(self):
-        stripe = self.builds["stripe"][2]
-        self.assertIn("LapZero", stripe)
-        self.assertIn("\\textbf{PPO}", stripe)
-        cohere = self.builds["cohere"][2]
-        self.assertTrue("Upgraded \\textbf{Maven} across the pipelines for 5 banks" in cohere
-                        or "Built a preflight stage" in cohere)
-        # The triage rewrite (rewrites.json) restates the same verified bullet.
-        self.assertTrue("Triaged failing pipelines for teams from error code to" in cohere or
-                        "Debugged failing pipelines from error code to" in cohere)
-
-    def test_summary_is_tailored(self):
-        stripe = self.summary(self.builds["stripe"][2])
-        self.assertTrue(re.search(r"\bml\b|machine learning", stripe), stripe)
-        affirm = self.summary(self.builds["affirm"][2])
-        self.assertTrue(re.search(r"\btests?\b|\bci\b", affirm), affirm)
-        cohere = self.summary(self.builds["cohere"][2])
-        self.assertIn("deploy", cohere)
-        self.assertIn("canadian citizen", cohere)
-        for name, (_c, _r, tex, _l) in self.builds.items():
-            summary = self.summary(tex)
-            self.assertNotIn("devops and platform engineer who automates", summary, name)
-            self.assertNotRegex(summary, r"(?:^|[.] )(?:also\b|[\w ]{0,30}experience:)", name)
-            self.assertLessEqual(len(summary), P.SUMMARY_MAX_CHARS, name)
-
-    def test_affirm_test_infra(self):
-        _code, report, tex, _l = self.builds["affirm"]
-        skills = [item for row in self.skills(tex).values() for item in row]
-        for skill in ("Python", "TypeScript", "pytest"):
-            self.assertIn(skill, skills)
-        self.assertIn("LapZero", tex)
-        self.assertTrue(any("eval harness" in item for item in self.items(tex)))
-        self.assertGreaterEqual(report["fit"]["resume_fit"], 6.5)
-
-    def test_stripe_mle(self):
-        _code, report, tex, _l = self.builds["stripe"]
-        items = self.items(tex)
-        self.assertIn("Roamly", tex)
-        self.assertTrue(any("eval harness" in item for item in items))
-        self.assertTrue(any("suggests what's near the user" in item for item in items))
-        self.assertGreaterEqual(report["fit"]["resume_fit"], 5.5)
-        interests = self.skills(tex).get("Interests", [])
-        self.assertTrue({"Apache Spark", "contextual bandits", "A/B testing"} & set(interests),
-                        interests)
-        for dropped in ("Traced the mismatches", "Finished that cleanup"):  # flagged for Stripe
-            self.assertNotIn(dropped, tex)
-
-    def test_flagged_bullets_are_dropped(self):
-        flagged = ("Ran floor operations", "CEO visit", "truckload", "trailer loads",
-                   "Shipped a \\textbf{Power BI} report", "Fed \\textbf{Power BI}", "Truth Social",
-                   "circadian")
-        for name, (_c, _r, tex, _l) in self.builds.items():
-            for text in flagged:
-                self.assertNotIn(text, tex, name)
-
-    def test_affirm_shows_test_infrastructure_from_every_source(self):
-        bullets = " ".join(self.items(self.builds["affirm"][2]))
-        for text in ("1,147 Python tests", "eval harness", "9 case validation suite",
-                     "preflight stage", "Built validation gates"):
-            self.assertIn(text, bullets)
-
-    def test_three_bullets_per_experience_and_no_leftovers(self):
-        for name, (_c, report, tex, _l) in self.builds.items():
-            for entry in report["resume"]["selected_content"]:
-                if entry["section"] == "Experience":
-                    self.assertGreaterEqual(len(entry["bullets"]), 3, (name, entry["entry"]))
-            self.assertNotIn("WATonomous", tex, name)
-            self.assertNotIn("Familiar with", tex, name)
-            self.assertNotIn("Argo CD", tex, name)
-            self.assertEqual(report["fit"]["dependency_lint"], [], name)
-
-    def test_dependent_bullets_stay_with_their_parent(self):
-        for name, (_c, _r, tex, _l) in self.builds.items():
-            items = [P.latex_to_plain(m) for m in re.findall(r"\\resumeItem\{(.*)\}", tex)]
-            for index, item in enumerate(items):
-                if item.startswith("Drove it"):
-                    self.assertTrue(items[index - 1].startswith("Automated access requests"),
-                                    name)
-
-
-# ---------------------------------------------------------------------------
-# Regression: the two reviewed runs (needs the real master profile and pdftotext)
-# ---------------------------------------------------------------------------
-HAVE_REAL = REAL_MASTER.is_file() and COHERE_PDF.is_file() and bool(shutil.which("pdftotext"))
-
-
-def pdf_text(pdf: Path) -> str:
-    return subprocess.run(["pdftotext", "-enc", "UTF-8", str(pdf), "-"], capture_output=True,
-                          text=True, check=True).stdout
-
-
-@unittest.skipUnless(HAVE_REAL, "real master profile, regression PDFs or pdftotext absent")
-class ReviewedResumesTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.master = P.parse_master(REAL_MASTER)
-        cls.fits = {}
-        for name, jd_path, pdf in (("cohere", COHERE_JD, COHERE_PDF),
-                                   ("stripe", STRIPE_JD, STRIPE_PDF)):
-            analysis = P.analyze(P.read_job_description(jd_path, REGRESSION), cls.master)
-            lines = P.resume_lines_from_text(pdf_text(pdf), cls.master)
-            cls.fits[name] = (analysis, P.assess_fit(analysis.coverage, lines), lines)
-
-    def test_existing_resumes_score_between_3_and_5(self):
-        for name, (_a, fit, _l) in self.fits.items():
-            self.assertGreaterEqual(fit["resume_fit"], 3.0, name)
-            self.assertLessEqual(fit["resume_fit"], 5.0, name)
-            self.assertTrue(fit["underselling"], name)
-
-    def test_profile_fit_matches_the_manual_review(self):
-        # Manual review: about 7 (Cohere) and about 6 ignoring the 3-year minimum (Stripe).
-        # The rubric gives 7.8 and 7.1; Stripe stays higher because real evidence for
-        # deploying, monitoring and debugging comes from DevOps work rather than ML systems.
-        cohere = self.fits["cohere"][1]["profile_fit"]
-        stripe = self.fits["stripe"][1]["profile_fit"]
-        self.assertTrue(6.0 <= cohere <= 8.0, cohere)
-        self.assertTrue(5.0 <= stripe <= 7.5, stripe)
-        self.assertGreater(cohere, stripe)
-
-    def test_hard_requirement_flags(self):
-        stripe = self.fits["stripe"][1]
-        self.assertIn("years: not_met", stripe["hard_requirement_flags"])
-        self.assertEqual(stripe["profile_fit_with_hard_requirements"], 4.0)
-        self.assertIn("TN status", stripe["work_authorization_note"])
-        cohere = self.fits["cohere"][1]
-        self.assertIn("clearance: unknown", cohere["hard_requirement_flags"])
-        self.assertTrue(cohere["work_authorization_note"].startswith("Canadian citizen"))
-
-    def test_false_positive_lines_do_not_count(self):
-        for name, (_a, fit, lines) in self.fits.items():
-            quotes = [t["resume"]["quote"] for row in fit["requirements"] for t in row["terms"]
-                      if t["resume"]]
-            for quote in quotes:
-                self.assertNotIn("stress tested", quote, name)
-                self.assertNotIn("Co-op evaluations", quote, name)
-                self.assertNotIn("WATonomous", quote, name)
-                self.assertNotIn("Autonomous Robotics", quote, name)
-
-    def test_the_previous_scores_overstated_fit(self):
-        # The skill-coverage gate called these 100 and 78; the resumes show far less.
-        for name, (analysis, fit, _l) in self.fits.items():
-            self.assertLess(fit["resume_fit"] * 10, analysis.score, name)
-
-
-@unittest.skipUnless(HAVE_REAL and STRIPE_V2_PDF.is_file() and AFFIRM_PDF.is_file(),
-                     "round-2 regression PDFs absent")
-class RoundTwoResumesTests(unittest.TestCase):
-    """The round-2 review: resume fit never exceeds profile fit on any fixture."""
-
-    def test_resume_fit_never_exceeds_profile_fit(self):
-        master = P.parse_master(REAL_MASTER)
-        for jd_path, pdf in ((COHERE_JD, COHERE_PDF), (STRIPE_JD, STRIPE_PDF),
-                             (STRIPE_JD, STRIPE_V2_PDF), (AFFIRM_JD, AFFIRM_PDF)):
-            analysis = P.analyze(P.read_job_description(jd_path, REGRESSION), master)
-            fit = P.assess_fit(analysis.coverage, P.resume_lines_from_text(pdf_text(pdf), master))
-            self.assertLessEqual(fit["resume_fit"], fit["profile_fit"], pdf.name)
-            self.assertTrue(1.0 <= fit["resume_fit"] <= 10.0, pdf.name)
 
 
 if __name__ == "__main__":

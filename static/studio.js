@@ -548,7 +548,13 @@ function renderSummary(box, ctx) {
       (fit.hard_requirement_flags || []).map((flag) => chip(flag.replace('_', ' '),
         flag.endsWith('not_met') ? 'fail' : 'warn')),
       fit.core_requirement_unmet ? chip('a core requirement has no evidence', 'warn') : null),
-    h('div', { class: 'muted small' }, 'Work authorization: ', fit.work_authorization_note))
+    h('div', { class: 'muted small' }, 'Work authorization: ', fit.work_authorization_note),
+    r.role_family ? h('div', { class: 'muted small' }, 'Role family: ',
+      h('strong', {}, r.role_family.code), ` (${r.role_family.name}), `,
+      `${Math.round(r.role_family.confidence * 100)}% by ${r.role_family.method}`,
+      r.files && r.files['report.md'] ? [' · ', h('a', {
+        href: `/api/files/${encodeURIComponent(ctx.jobId)}/report.md`, target: '_blank',
+        rel: 'noopener' }, 'Run report ↗')] : null) : null)
     : h('div', { class: 'notice small' }, 'This report predates profile and resume fit. Re-run tailoring.');
   clear(box, fitBlock, h('div', { class: 'verdict gate-line' },
     h('span', { class: `verdict-badge ${proceed ? 'proceed' : 'reject'}` }, proceed ? 'PROCEED' : 'LOW FIT'),

@@ -17,7 +17,7 @@ so scores, gates, provenance and briefings are exactly what the CLI produces:
     GET  /api/provenance/{job_id}       provenance map plus the master profile lines
     GET  /api/fit/{job_id}              requirements, profile fit, resume fit, hard flags
     GET  /api/briefing/{job_id}         interview briefing and gap analysis
-    GET  /api/files/{job_id}/{name}     resume PDF, .tex, logs, briefing Markdown
+    GET  /api/files/{job_id}/{name}     resume PDF, .tex, logs, briefing and run report
     GET  /api/tasks/{task_id}[/events]  task state, or its log as Server-Sent Events
     GET  /api/profile, /api/template    editable sources with a parsed summary
     POST /api/profile, /api/template    validate, back up, then save atomically
@@ -83,7 +83,8 @@ FETCH_SOURCES = ("free", "all", *fetch_jobs.ADAPTERS)
 SERVED_FILES = {"resume.pdf": "application/pdf", "resume.tex": "text/plain",
                 "resume.log": "text/plain", "resume.failed.tex": "text/plain",
                 "resume.failed.log": "text/plain", "resume.unverified.tex": "text/plain",
-                "briefing.md": "text/markdown", "fit_report.md": "text/markdown"}
+                "briefing.md": "text/markdown", "report.md": "text/markdown",
+                "job.json": "application/json", "fit_report.md": "text/markdown"}
 EXIT_MEANINGS = {
     pipeline.EXIT_OK: "verified",
     pipeline.EXIT_INVALID_INPUT: "invalid input",
@@ -523,7 +524,7 @@ class Studio:
         present = {name: self.output_file(base, name).is_file() for name in (
             "resume.pdf", "resume.tex", "resume.log", "resume.failed.log", "resume.failed.tex",
             "resume.unverified.tex", "provenance.json", "briefing.json", "briefing.md",
-            "gap_analysis.json", "requirements.json", "fit_report.md")}
+            "gap_analysis.json", "requirements.json", "report.md", "job.json")}
         log_name = "resume.failed.log" if present["resume.failed.log"] and \
             resume.get("status") != "verified" else "resume.log"
         log_lines = _tail(self.output_file(base, log_name)) if present[log_name] else []
@@ -548,11 +549,13 @@ class Studio:
             "requirements": analysis.get("requirements", []),
             "parsing_warnings": analysis.get("parsing_warnings", []),
             "fit": analysis.get("fit"),
+            "role_family": analysis.get("role_family"),
             "resume": {k: resume.get(k) for k in (
                 "status", "reason", "generated", "compiled", "single_page_verified",
                 "page_count", "override_low_fit", "build_gates", "fitting", "verification",
                 "provenance", "last_valid_pdf_kept", "template_items_removed",
-                "rejected_template_bullets", "warnings", "selected_content")},
+                "rejected_template_bullets", "warnings", "selected_content", "kit_notes",
+                "summary_source", "summary_facts", "project_ranking")},
             "files": present, "pdf": pdf,
             "log": {"name": log_name, "tail": log_lines,
                     "fatal": pipeline.fatal_log_lines("\n".join(log_lines))},
