@@ -7,3 +7,4 @@
 /tests/fixtures/regression/*.pdf
 /tests/fixtures/regression/*.tex
 /tests/fixtures/bad_outputs/*.pdf
+/outputs/

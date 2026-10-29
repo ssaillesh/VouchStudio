@@ -29,7 +29,7 @@ from typing import Any
 
 import jobboard
 
-STUDIO_URL = "http://127.0.0.1:8000/#/jobs"  # the one page for the board and tailoring
+STUDIO_URL = "http://127.0.0.1:8000/"  # Vouch: home page, accounts and the board
 MAX_BODY_BYTES = 3_000_000  # base64 of a 2 MB upload plus JSON overhead
 DRAIN_LIMIT_BYTES = 12_000_000  # beyond this, the connection is simply closed
 

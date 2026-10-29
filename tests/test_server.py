@@ -30,6 +30,8 @@ except ImportError:  # FastAPI lives in .venv only
     S = None
 
 HEADERS = {"X-Vouch-Studio": "1"}
+PASSWORD = "correct horse battery"
+OWNER = "owner@example.com"
 JOOBLE_KEY = "studio-test-jooble-key-0000"
 
 
@@ -71,7 +73,19 @@ class StudioCase(unittest.TestCase):
         self.runner = self.runner_factory()
         self.studio = S.Studio(self.root, which=fake_which(), runner=self.runner,
                                opener=self.opener, env={}, sleep=lambda s: None)
-        self.client = TestClient(S.create_app(self.studio), base_url="http://127.0.0.1:8000")
+        self.app = S.create_app(self.studio)
+        self.client = self.make_client(OWNER, admin=True)  # the workspace owner
+
+    def make_client(self, email: str | None = None, admin: bool = False) -> "TestClient":
+        """A browser: signed up (and signed in) as `email`, or anonymous."""
+        client = TestClient(self.app, base_url="http://127.0.0.1:8000", follow_redirects=False)
+        if email:
+            res = client.post("/api/auth/signup", json={"email": email, "password": PASSWORD},
+                              headers=HEADERS)
+            self.assertEqual(res.status_code, 201, res.text)
+            if admin:
+                self.studio.accounts.set_admin(email)
+        return client
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -109,7 +123,7 @@ class SecurityTests(StudioCase):
         self.assertEqual(self.post("/api/jobs/upload", body, headers=local).status_code, 201)
 
     def test_security_headers_and_static_shell(self):
-        res = self.client.get("/")
+        res = self.client.get("/app")
         self.assertEqual(res.status_code, 200)
         self.assertIn("/static/studio.js", res.text)
         self.assertIn("script-src 'self'", res.headers["content-security-policy"])
@@ -118,7 +132,7 @@ class SecurityTests(StudioCase):
         self.assertEqual(self.client.get("/static/studio.js").status_code, 200)
 
     def test_page_and_assets_are_revalidated_so_ui_edits_show(self):
-        for path in ("/", "/static/studio.css", "/static/studio.js"):
+        for path in ("/", "/app", "/static/studio.css", "/static/studio.js"):
             res = self.client.get(path)
             self.assertEqual(res.status_code, 200, path)
             self.assertEqual(res.headers["cache-control"], "no-cache", path)
@@ -128,6 +142,275 @@ class SecurityTests(StudioCase):
         res = self.client.post("/api/jobs/upload", content=b"x" * (S.MAX_BODY_BYTES + 1),
                                headers=dict(HEADERS, **{"Content-Type": "application/json"}))
         self.assertEqual(res.status_code, 413)
+
+
+RESUME = ("Platform engineer\n\nExperience\n- Built Python services with Docker and "
+          "PostgreSQL for internal teams across several product groups\n- Wrote tests and "
+          "deployment scripts that kept releases steady during busy quarters\n")
+
+
+def b64(text: str) -> str:
+    import base64
+    return base64.b64encode(text.encode()).decode()
+
+
+class AccountTests(StudioCase):
+    """Sign-up, sessions, roles and each account's own profile."""
+
+    def test_signup_login_logout_and_me(self):
+        anon = self.make_client()
+        self.assertEqual(anon.get("/api/me").status_code, 401)
+        self.assertEqual(anon.get("/api/jobs").status_code, 401)
+        app = anon.get("/app")
+        self.assertEqual((app.status_code, app.headers["location"]), (303, "/login"))
+        self.assertEqual(anon.get("/").status_code, 200)  # the home page is public
+        self.assertEqual(anon.get("/signup").status_code, 200)
+        res = anon.post("/api/auth/signup", json={"email": "Dana@Example.com", "password": PASSWORD,
+                                                  "name": "Dana"}, headers=HEADERS)
+        self.assertEqual(res.status_code, 201, res.text)
+        cookie = res.headers["set-cookie"]
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=lax", cookie)
+        me = anon.get("/api/me").json()["user"]
+        self.assertEqual((me["email"], me["name"], me["is_admin"]), ("dana@example.com", "Dana", False))
+        self.assertEqual(anon.get("/login").status_code, 303)  # already signed in
+        self.assertEqual(anon.post("/api/auth/logout", headers=HEADERS).status_code, 200)
+        self.assertEqual(anon.get("/api/me").status_code, 401)
+        wrong = anon.post("/api/auth/login", json={"email": "dana@example.com", "password": "nope-nope"},
+                          headers=HEADERS)
+        self.assertEqual(wrong.status_code, 401)
+        right = anon.post("/api/auth/login", json={"email": "DANA@example.com", "password": PASSWORD},
+                          headers=HEADERS)
+        self.assertEqual(right.status_code, 200)
+        self.assertEqual(anon.get("/api/me").status_code, 200)
+
+    def test_passwords_and_session_tokens_are_stored_hashed(self):
+        import hashlib
+        import sqlite3
+        conn = sqlite3.connect(self.studio.accounts.db_path)
+        stored = conn.execute("SELECT password_hash FROM users WHERE email = ?", (OWNER,)).fetchone()[0]
+        self.assertTrue(stored.startswith("scrypt$"))
+        self.assertNotIn(PASSWORD, stored)
+        token = self.client.cookies.get(S.SESSION_COOKIE)
+        hashes = [r[0] for r in conn.execute("SELECT token_hash FROM sessions")]
+        conn.close()
+        self.assertNotIn(token, hashes)
+        self.assertIn(hashlib.sha256(token.encode()).hexdigest(), hashes)
+        self.assertEqual(self.studio.accounts.db_path.stat().st_mode & 0o777, 0o600)
+
+    def test_signup_rules_and_login_throttle(self):
+        anon = self.make_client()
+        for body, code in (({"email": "not-an-email", "password": PASSWORD}, 422),
+                           ({"email": "a@example.com", "password": "short"}, 422),
+                           ({"email": OWNER, "password": PASSWORD}, 409)):
+            self.assertEqual(anon.post("/api/auth/signup", json=body, headers=HEADERS).status_code,
+                             code, body)
+        for _ in range(10):
+            anon.post("/api/auth/login", json={"email": OWNER, "password": "wrong-guess"},
+                      headers=HEADERS)
+        locked = anon.post("/api/auth/login", json={"email": OWNER, "password": PASSWORD},
+                           headers=HEADERS)
+        self.assertEqual(locked.status_code, 429)  # even the right password waits
+        self.assertEqual(anon.post("/api/auth/login", json={"email": OWNER, "password": PASSWORD}).status_code,
+                         403)  # and every POST still needs the Studio header
+
+    def test_other_accounts_never_see_the_owner_files(self):
+        user = self.make_client("dana@example.com")
+        jobs = user.get("/api/jobs").json()
+        self.assertIsNone(jobs["profile"])
+        self.assertTrue(all(j["score"] is None and "tailored" not in j for j in jobs["jobs"]))
+        meta = user.get("/api/meta").json()
+        self.assertNotIn("tools", meta)
+        self.assertNotIn("master", meta)
+        detail = user.get("/api/jobs/proceed").json()
+        self.assertNotIn("results", detail)
+        self.assertNotIn("board_score", detail)
+        self.assertIsNone(detail["my_score"])
+        master_lines = [l for l in MASTER_KIT.splitlines() if len(l) > 30][:20]
+        for path in ("/api/jobs", "/api/meta", "/api/jobs/proceed", "/api/me/profile"):
+            body = user.get(path).text
+            for line in master_lines:
+                self.assertNotIn(line.strip("- `[V]R"), body, path)
+        for method, path in (("post", "/api/jobs/fetch"), ("post", "/api/jobs/upload"),
+                             ("post", "/api/tailor/proceed"), ("get", "/api/tailor/proceed"),
+                             ("get", "/api/provenance/proceed"), ("get", "/api/fit/proceed"),
+                             ("get", "/api/briefing/proceed"), ("get", "/api/files/proceed/resume.pdf"),
+                             ("get", "/api/tasks"), ("get", "/api/profile"), ("get", "/api/template"),
+                             ("post", "/api/profile"), ("post", "/api/template/validate")):
+            res = getattr(user, method)(path, **({"json": {}, "headers": HEADERS} if method == "post" else {}))
+            self.assertEqual(res.status_code, 403, (method, path, res.text))
+
+    def test_each_account_is_scored_against_its_own_profile_and_keeps_it(self):
+        dana = self.make_client("dana@example.com")
+        lee = self.make_client("lee@example.com")
+        self.client.get("/api/jobs")  # builds the job index
+        before = {p.relative_to(self.root) for p in self.root.rglob("*") if ".studio" not in p.parts}
+        res = dana.post("/api/me/profile", json={"filename": "resume.txt", "content_base64": b64(RESUME)},
+                        headers=HEADERS)
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["summary"]["mode"], "resume")
+        self.assertEqual(res.json()["stored"]["text"].strip(), RESUME.strip())
+        board = dana.get("/api/jobs").json()
+        self.assertEqual((board["profile"]["filename"], board["profile"]["source"]),
+                         ("resume.txt", "account"))
+        self.assertTrue(any(j["score"] is not None for j in board["jobs"]))
+        self.assertIsNone(lee.get("/api/jobs").json()["profile"])  # Dana's file is Dana's
+        owner = self.client.get("/api/jobs").json()["profile"]
+        self.assertEqual(owner["source"], "workspace")  # the admin falls back to master.md
+        # stored with the account (in .studio/), never in the workspace files
+        self.assertEqual({p.relative_to(self.root) for p in self.root.rglob("*")
+                          if ".studio" not in p.parts}, before)
+        restarted = S.Studio(self.root, which=fake_which(), runner=self.runner, opener=self.opener,
+                             env={}, sleep=lambda s: None)
+        again = TestClient(S.create_app(restarted), base_url="http://127.0.0.1:8000")
+        again.post("/api/auth/login", json={"email": "dana@example.com", "password": PASSWORD},
+                   headers=HEADERS)
+        self.assertEqual(again.get("/api/me/profile").json()["stored"]["filename"], "resume.txt")
+        bad = dana.post("/api/me/profile", json={"filename": "x.txt", "content_base64": "%%%"},
+                        headers=HEADERS)
+        self.assertEqual(bad.status_code, 422)
+
+    def test_admin_job_detail_keeps_the_workspace_skill_gate(self):
+        self.client.post("/api/me/profile", json={"filename": "resume.txt",
+                                                  "content_base64": b64(RESUME)}, headers=HEADERS)
+        detail = self.client.get("/api/jobs/proceed").json()
+        jd = P.read_job_description(self.root / "target_jobs" / "proceed.md", self.root)
+        self.assertEqual(detail["board_score"]["score"],
+                         P.analyze(jd, P.parse_master(self.root / "master.md")).score)
+        self.assertEqual(detail["profile"]["source"], "account")  # the board uses the upload
+
+    def test_edit_remove_profile_and_delete_account(self):
+        dana = self.make_client("dana@example.com")
+        dana.post("/api/me/profile", json={"filename": "resume.txt", "content_base64": b64(RESUME)},
+                  headers=HEADERS)
+        edited = RESUME + "- Ran Kubernetes clusters for staging environments across regions\n"
+        res = dana.post("/api/me/profile", json={"filename": "resume.txt", "content_base64": b64(edited)},
+                        headers=HEADERS).json()
+        self.assertIn("Kubernetes", res["stored"]["text"])
+        self.assertIsNone(dana.post("/api/me/profile/delete", headers=HEADERS).json()["stored"])
+        self.assertEqual(dana.post("/api/me/delete", json={"password": "wrong-one"},
+                                   headers=HEADERS).status_code, 403)
+        self.assertEqual(dana.post("/api/me/delete", json={"password": PASSWORD},
+                                   headers=HEADERS).json(), {"deleted": True})
+        self.assertEqual(dana.get("/api/me").status_code, 401)
+        self.assertIsNone(self.studio.accounts.user_by_email("dana@example.com"))
+
+    def test_public_stats_hold_no_personal_data(self):
+        stats = self.make_client().get("/api/stats").json()
+        self.assertEqual(set(stats), {"jobs", "companies", "scorable", "threshold"})
+        self.assertEqual(stats["jobs"], 2)
+
+    def test_make_admin_command(self):
+        self.make_client("dana@example.com")
+        self.assertEqual(S.main(["--workspace", str(self.root), "--make-admin", "dana@example.com"]), 0)
+        self.assertTrue(self.studio.accounts.user_by_email("dana@example.com")["is_admin"])
+        self.assertEqual(S.main(["--workspace", str(self.root), "--make-admin", "x@example.com"]), 1)
+
+
+HEADER = {"name": "Test Person", "email": "test.person@example.com", "phone": "+1 416 555 0100",
+          "location": "Toronto, ON", "links": ["github.com/test-person"],
+          "education": [{"school": "Example University", "degree": "BSc Physics", "dates": "2024",
+                         "location": "Waterloo, ON"}]}
+
+
+class PlanTests(StudioCase):
+    """Basic and Pro plans, Pro requests to the admin, and Pro builds from the account's own files."""
+
+    def pro_ready(self, client):
+        client.post("/api/me/profile", json={"filename": "master.md", "content_base64": b64(MASTER_KIT)},
+                    headers=HEADERS)
+        res = client.post("/api/me/resume-header", json=HEADER, headers=HEADERS)
+        self.assertEqual(res.status_code, 200, res.text)
+        return res.json()
+
+    def test_admin_emails_are_admins_from_sign_up(self):
+        studio = S.Studio(self.root, which=fake_which(), runner=self.runner, opener=self.opener, env={},
+                          sleep=lambda s: None, admin_emails=frozenset({"boss@example.com"}))
+        client = TestClient(S.create_app(studio), base_url="http://127.0.0.1:8000")
+        res = client.post("/api/auth/signup", json={"email": "Boss@Example.com", "password": PASSWORD},
+                          headers=HEADERS)
+        self.assertTrue(res.json()["user"]["is_admin"])
+        other = client.post("/api/auth/signup", json={"email": "x@example.com", "password": PASSWORD},
+                            headers=HEADERS).json()["user"]
+        self.assertEqual((other["is_admin"], other["plan"], other["is_pro"]), (False, "basic", False))
+
+    def test_admin_emails_come_from_a_file_outside_git(self):
+        (self.root / ".studio").mkdir(exist_ok=True)
+        (self.root / ".studio" / "admins.txt").write_text("# admins\nlead@example.com\n")
+        studio = S.Studio(self.root, which=fake_which(), runner=self.runner, opener=self.opener, env={},
+                          sleep=lambda s: None)
+        self.assertEqual(studio.accounts.admin_emails, frozenset({"lead@example.com"}))
+
+    def test_request_approve_and_switch_plans(self):
+        dana = self.make_client("dana@example.com")
+        self.assertEqual(dana.post("/api/builds/proceed", headers=HEADERS).status_code, 403)  # Basic
+        req = dana.post("/api/me/pro-request", json={"note": "Applying to platform roles"},
+                        headers=HEADERS).json()["pro_request"]
+        self.assertEqual(req["status"], "pending")
+        again = dana.post("/api/me/pro-request", json={}, headers=HEADERS).json()["pro_request"]
+        self.assertEqual(again["id"], req["id"])  # one pending request at a time
+        self.assertEqual(dana.get("/api/admin/overview").status_code, 403)
+        overview = self.client.get("/api/admin/overview").json()
+        self.assertEqual(overview["pending"], 1)
+        self.assertEqual(self.client.get("/api/meta").json()["pending_requests"], 1)
+        self.assertEqual(overview["requests"][0]["note"], "Applying to platform roles")
+        approved = self.post(f"/api/admin/requests/{req['id']}/approve").json()
+        self.assertEqual(approved["pending"], 0)
+        me = dana.get("/api/me").json()
+        self.assertEqual((me["user"]["plan"], me["user"]["is_pro"]), ("pro", True))
+        self.assertEqual(self.post(f"/api/admin/requests/{req['id']}/decline").status_code, 409)
+        user_id = me["user"]["id"]
+        self.post(f"/api/admin/users/{user_id}/plan", {"plan": "basic"})
+        self.assertFalse(dana.get("/api/me").json()["user"]["is_pro"])
+        self.assertEqual(self.post(f"/api/admin/users/{user_id}/plan", {"plan": "gold"}).status_code, 422)
+        self.assertEqual(dana.post(f"/api/admin/users/{user_id}/plan", json={"plan": "pro"},
+                                   headers=HEADERS).status_code, 403)
+
+    def test_a_pro_build_uses_only_the_accounts_own_files(self):
+        dana = self.make_client("dana@example.com")
+        self.studio.accounts.set_plan(dana.get("/api/me").json()["user"]["id"], "pro")
+        needs = dana.get("/api/me/resume-header").json()["build"]
+        self.assertEqual(needs["missing"], ["profile", "header"])
+        dana.post("/api/me/profile", json={"filename": "resume.txt", "content_base64": b64(RESUME)},
+                  headers=HEADERS)
+        self.assertIn("master", dana.get("/api/me/resume-header").json()["build"]["missing"])
+        self.assertEqual(self.pro_ready(dana)["build"], {"pro": True, "missing": [], "ready": True})
+        before = sorted(p.relative_to(self.root) for p in self.root.rglob("*") if ".studio" not in p.parts)
+        res = dana.post("/api/builds/proceed", json={}, headers=HEADERS)
+        self.assertEqual(res.status_code, 200, res.text)
+        build = res.json()["build"]
+        self.assertEqual(build["status"], "verified")
+        self.assertTrue(build["has_pdf"])
+        self.assertEqual(build["summary"]["gates"]["gate_4_layout"], "passed")
+        self.assertEqual(sorted(p.relative_to(self.root) for p in self.root.rglob("*")
+                                if ".studio" not in p.parts), before)  # nothing in the workspace
+        tex = next(c for c in self.runner.commands if Path(c[0]).name == "pdflatex")
+        self.assertNotIn(str(self.root / "template.tex"), " ".join(tex))
+        pdf = dana.get("/api/builds/proceed/resume.pdf")
+        self.assertEqual((pdf.status_code, pdf.headers["content-type"]), (200, "application/pdf"))
+        self.assertNotIn("content-security-policy", pdf.headers)
+        self.assertIn("Requirements", dana.get("/api/builds/proceed/report").text)
+        self.assertEqual(dana.get("/api/jobs/proceed").json()["my_build"]["status"], "verified")
+        lee = self.make_client("lee@example.com")
+        self.assertEqual(lee.get("/api/builds/proceed/resume.pdf").status_code, 404)  # Dana's only
+        self.assertEqual(lee.get("/api/builds").json(), {"builds": []})
+
+    def test_low_fit_builds_need_the_override(self):
+        dana = self.make_client("dana@example.com")
+        self.studio.accounts.set_plan(dana.get("/api/me").json()["user"]["id"], "pro")
+        self.pro_ready(dana)
+        low = dana.post("/api/builds/reject", json={}, headers=HEADERS).json()["build"]
+        self.assertFalse(low["has_pdf"])
+        self.assertEqual(low["summary"]["verdict"], P.VERDICT_REJECT)
+        forced = dana.post("/api/builds/reject", json={"override_low_fit": True}, headers=HEADERS)
+        self.assertEqual(forced.json()["build"]["summary"]["verdict"], P.VERDICT_REJECT)
+
+    def test_bad_headers_are_refused(self):
+        dana = self.make_client("dana@example.com")
+        for bad in ({**HEADER, "name": ""}, {**HEADER, "links": ["javascript:alert(1)"]},
+                    {**HEADER, "links": ["https://x.example/a?b=c"]}, {**HEADER, "email": "nope"}):
+            self.assertEqual(dana.post("/api/me/resume-header", json=bad, headers=HEADERS).status_code,
+                             422, bad)
 
 
 class JobsApiTests(StudioCase):
@@ -157,34 +440,6 @@ class JobsApiTests(StudioCase):
         self.assertEqual(both["matching"], 2)
         none = self.client.get("/api/jobs", params={"level": "Director and above"}).json()
         self.assertEqual(none["matching"], 0)
-
-    def test_an_uploaded_resume_ranks_the_board_in_memory_only(self):
-        import base64
-        self.client.get("/api/jobs")  # builds the job index first
-        before = {p.relative_to(self.root) for p in self.root.rglob("*")}
-        resume = ("Platform engineer\n\nExperience\n- Built Python services with Docker and "
-                  "PostgreSQL for internal teams across several product groups\n- Wrote tests "
-                  "and deployment scripts that kept releases steady during busy quarters\n")
-        res = self.post("/api/resume", {"filename": "resume.txt",
-                                        "content_base64": base64.b64encode(resume.encode()).decode()})
-        self.assertEqual(res.status_code, 200, res.text)
-        self.assertEqual(res.json()["profile"]["source"], "upload")
-        self.assertEqual(res.json()["profile"]["mode"], "resume")
-        data = self.client.get("/api/jobs").json()
-        self.assertEqual(data["profile"]["filename"], "resume.txt")
-        detail = self.client.get("/api/jobs/proceed").json()  # the skill gate stays the master's
-        jd = P.read_job_description(self.root / "target_jobs" / "proceed.md", self.root)
-        self.assertEqual(detail["board_score"]["score"],
-                         P.analyze(jd, P.parse_master(self.root / "master.md")).score)
-        self.assertEqual({p.relative_to(self.root) for p in self.root.rglob("*")}, before)
-        cleared = self.post("/api/resume/clear", {}).json()
-        self.assertEqual(cleared["profile"]["source"], "master")
-        self.assertEqual(self.client.get("/api/resume").json()["profile"]["source"], "master")
-        bad = self.post("/api/resume", {"filename": "x.txt", "content_base64": "%%%"})
-        self.assertEqual(bad.status_code, 422)
-        self.assertEqual(self.client.post("/api/resume", json={"filename": "x.txt",
-                                                               "content_base64": "eA=="}).status_code,
-                         403)  # no X-Vouch-Studio header
 
     def test_board_score_equals_the_pipeline_score(self):
         jd = P.read_job_description(self.root / "target_jobs" / "proceed.md", self.root)

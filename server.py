@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-"""Vouch Studio: a local web UI over pipeline.py, fetch_jobs.py and jobboard.py.
+"""Vouch Studio: the web app over pipeline.py, fetch_jobs.py and jobboard.py.
 
-    ./run_ui.sh        # creates .venv, starts http://127.0.0.1:8000 and opens the browser
+    ./run_ui.sh                       # creates .venv, starts http://127.0.0.1:8000
+    ./run_ui.sh --make-admin EMAIL    # give your account the workspace tools
 
 The engine stays on the standard library; FastAPI and uvicorn are used only here
 (see requirements-ui.txt). Every route calls the engine's own functions in-process,
-so scores, gates, provenance and briefings are exactly what the CLI produces:
+so scores, gates, provenance and briefings are exactly what the CLI produces.
 
-    GET  /api/meta                      tools, profile, index and the running task
-    GET  /api/jobs                      filtered, sorted, paginated jobs with fit scores
-    GET  /api/resume                    which profile ranks the board (master or an upload)
-    POST /api/resume[/clear]            rank against an uploaded resume (memory only), or stop
-    GET  /api/jobs/{job_id}             one job: metadata, description, latest results
+Pages: / (home), /signup, /login, and /app (the board; needs an account).
+Accounts (accounts.py) keep each user's uploaded profile; the board scores every job
+against it. The admin account also gets the workspace: tailoring, fetching and the
+master profile and template editors, which run on the owner's own files and are never
+shown to other accounts.
+
+    POST /api/auth/signup|login|logout  accounts; the session is an HttpOnly cookie
+    GET  /api/me, /api/me/profile       who is signed in; their stored profile as text
+    POST /api/me/profile[/delete]       upload or replace it ({filename, content_base64})
+    POST /api/me/delete                 delete the account and its profile (password)
+    GET  /api/stats                     public board counts for the home page
+    GET  /api/meta                      board facts (and tools and tasks for the admin)
+    GET  /api/jobs                      filtered, sorted, paginated jobs scored for you
+    GET  /api/jobs/{job_id}             one job: description and your score
+  admin only:
     POST /api/jobs/fetch                run fetch_jobs.run as a task (streams its log)
     POST /api/jobs/upload               save a pasted or uploaded description
     POST /api/tailor/{job_id}           run pipeline.run as a task (streams compiles)
@@ -26,9 +37,10 @@ so scores, gates, provenance and briefings are exactly what the CLI produces:
 
 The server binds to 127.0.0.1. Requests must name a local Host (DNS rebinding),
 and state-changing requests must carry the X-Vouch-Studio header, which a
-cross-site page cannot send without a CORS preflight this server never grants.
-One task runs at a time, and the profile and template cannot be saved while it
-runs: CLAUDE.md forbids editing them during a pipeline run.
+cross-site page cannot send without a CORS preflight this server never grants; the
+session cookie is also SameSite=Lax. One task runs at a time, and the profile and
+template cannot be saved while it runs: CLAUDE.md forbids editing them during a
+pipeline run.
 """
 
 from __future__ import annotations
@@ -56,20 +68,26 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse, Response,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import accounts
 import fetch_jobs
 import jobboard
 import pipeline
+import resume_kit
+import user_template
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 STUDIO_HEADER = "x-vouch-studio"
+SESSION_COOKIE = "vouch_session"
+SCORE_CACHE_SIZE = 16  # parsed profiles and their board scores, least recently used out
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 MAX_BODY_BYTES = 4_000_000
 MAX_PROFILE_BYTES = 2_000_000
@@ -240,9 +258,52 @@ class UploadRequest(BaseModel):
     role: str | None = Field(default=None, max_length=160)
 
 
-class ResumeUpload(BaseModel):
+class ProfileUpload(BaseModel):
     filename: str = Field(max_length=200)
     content_base64: str = Field(max_length=MAX_BODY_BYTES)
+
+
+class SignupRequest(BaseModel):
+    email: str = Field(max_length=accounts.EMAIL_MAX)
+    password: str = Field(max_length=accounts.PASSWORD_MAX)
+    name: str = Field(default="", max_length=accounts.NAME_MAX)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=accounts.EMAIL_MAX)
+    password: str = Field(max_length=accounts.PASSWORD_MAX)
+
+
+class PasswordConfirm(BaseModel):
+    password: str = Field(max_length=accounts.PASSWORD_MAX)
+
+
+class EducationItem(BaseModel):
+    school: str = Field(default="", max_length=200)
+    degree: str = Field(default="", max_length=200)
+    dates: str = Field(default="", max_length=200)
+    location: str = Field(default="", max_length=200)
+
+
+class ResumeHeader(BaseModel):
+    name: str = Field(default="", max_length=200)
+    email: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=200)
+    location: str = Field(default="", max_length=200)
+    links: list[str] = Field(default_factory=list, max_length=10)
+    education: list[EducationItem] = Field(default_factory=list, max_length=10)
+
+
+class ProRequest(BaseModel):
+    note: str = Field(default="", max_length=accounts.NOTE_MAX)
+
+
+class BuildRequest(BaseModel):
+    override_low_fit: bool = False
+
+
+class PlanChange(BaseModel):
+    plan: str = Field(pattern=r"^(basic|pro)$")
 
 
 class TailorRequest(BaseModel):
@@ -326,7 +387,8 @@ class Studio:
                  runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
                  opener: Callable[..., Any] | None = None, env: dict[str, str] | None = None,
                  sleep: Callable[[float], None] = time.sleep,
-                 backup_dir: Path | None = None) -> None:
+                 backup_dir: Path | None = None, db_path: Path | str | None = None,
+                 admin_emails: frozenset[str] | None = None) -> None:
         self.workspace = workspace.resolve()
         self.target_dir = self.workspace / "target_jobs"
         self.outputs = self.workspace / pipeline.OUTPUT_DIR_NAME
@@ -340,11 +402,17 @@ class Studio:
         self.tasks: dict[str, Task] = {}
         self.active: Task | None = None
         self._index: dict[str, Any] | None = None
-        # Board scores per source ("master", "upload"): (key, rows, profile summary).
-        self._scores: dict[str, tuple[tuple, dict[str, dict[str, Any]], dict[str, Any]]] | None \
-            = None
-        # A resume uploaded to rank the board: parsed in memory, never written or logged.
-        self.uploaded: tuple[str, jobboard.Profile] | None = None
+        # Board scores per profile file and index: key -> (rows, profile summary).
+        self._scores: collections.OrderedDict[tuple, tuple[dict[str, dict[str, Any]],
+                                                           dict[str, Any]]] | None = None
+        # Accounts live in Postgres when DATABASE_URL is set (Neon), else in SQLite here.
+        db = db_path or (self.env or os.environ).get("DATABASE_URL") or \
+            self.workspace / ".studio" / "vouch.db"
+        if admin_emails is None:  # never in git: .studio/admins.txt or VOUCH_ADMIN_EMAILS
+            admin_emails = accounts.read_admin_emails(self.workspace / ".studio" / "admins.txt",
+                                                      self.env if self.env is not None else None)
+        self.accounts = accounts.Accounts(db, admin_emails=admin_emails)
+        self.build_lock = threading.Lock()  # one Pro build compiles at a time
 
     # -- paths ---------------------------------------------------------------
     def master_path(self) -> Path:
@@ -379,66 +447,219 @@ class Studio:
             self._scores = None
         return index
 
-    def scores(self, use_upload: bool = True) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
-        """Board scores for the uploaded resume (when there is one and `use_upload`), else
-        the master profile; cached per profile and index. Tailoring always uses the master."""
-        index = self.index()
-        uploaded = self.uploaded if use_upload else None
-        if uploaded is not None:
-            key: tuple = ("upload", uploaded[0], id(index), len(index["jobs"]))
-            profile = uploaded[1]
-        else:
+    def _profile_file(self, user: dict[str, Any] | None, workspace: bool = False
+                      ) -> tuple[str, bytes, str] | None:
+        """(filename, bytes, origin) of the profile that scores the board for `user`.
+
+        Every account is scored against the file it uploaded. Only the admin can fall back
+        to the workspace master profile (or ask for it with `workspace`); no other account
+        is ever scored against, or shown, that file.
+        """
+        if user is not None and not workspace:
+            stored = self.accounts.profile(user["id"])
+            if stored is not None:
+                return stored["filename"], stored["content"], "account"
+        if user is not None and user.get("is_admin"):
             try:
                 master = self.master_path()
-                data = master.read_bytes()
-            except (pipeline.PipelineError, OSError) as exc:
-                return {}, {"error": str(exc), "source": "master"}
-            key = ("master", _sha(data), id(index), len(index["jobs"]))
-            profile = None
-        source = key[0]
-        with self.lock:
-            cached = (self._scores or {}).get(source)
-            if cached and cached[0] == key:
-                return cached[1], cached[2]
-        if profile is None:
-            try:
-                profile = jobboard.load_profile(master.name, data)
-            except jobboard.ProfileError as exc:
-                return {}, {"error": str(exc), "source": "master"}
-        rows = {row["id"]: row for row in jobboard.score_jobs(profile, index["jobs"])}
-        summary = {**profile.summary(), "source": "upload" if uploaded else "master"}
-        with self.lock:
-            self._scores = {**(self._scores or {}), source: (key, rows, summary)}
-        return rows, summary
+                return master.name, master.read_bytes(), "workspace"
+            except (pipeline.PipelineError, OSError):
+                return None
+        return None
 
-    def set_resume(self, body: ResumeUpload) -> dict[str, Any]:
-        """Rank the board against an uploaded resume or master profile (memory only)."""
+    def scores(self, user: dict[str, Any] | None, workspace: bool = False
+               ) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
+        """Board scores for `user`'s profile, cached per profile file and index."""
+        found = self._profile_file(user, workspace)
+        if found is None:
+            return {}, None
+        filename, data, origin = found
+        index = self.index()
+        key = (_sha(data), filename, id(index), len(index["jobs"]))
+        with self.lock:
+            cached = (self._scores or collections.OrderedDict()).get(key)
+            if cached is not None:
+                self._scores.move_to_end(key)
+                return cached[0], {**cached[1], "source": origin}
+        try:
+            profile = jobboard.load_profile(filename, data)
+        except jobboard.ProfileError as exc:
+            return {}, {"error": str(exc), "filename": filename, "source": origin}
+        rows = {row["id"]: row for row in jobboard.score_jobs(profile, index["jobs"])}
+        summary = profile.summary()
+        with self.lock:
+            if self._scores is None:
+                self._scores = collections.OrderedDict()
+            self._scores[key] = (rows, summary)
+            while len(self._scores) > SCORE_CACHE_SIZE:
+                self._scores.popitem(last=False)
+        return rows, {**summary, "source": origin}
+
+    def score_counts(self, user: dict[str, Any]) -> dict[str, Any]:
+        scores, profile = self.scores(user)
+        ranked = [s for s in scores.values() if not s["insufficient"]]
+        return {"summary": profile, "threshold": pipeline.FIT_THRESHOLD,
+                "scored": len(ranked),
+                "proceed": sum(1 for s in ranked if s["score"] >= pipeline.FIT_THRESHOLD),
+                "thin": sum(1 for s in scores.values() if s["insufficient"])}
+
+    # -- accounts' own profiles -----------------------------------------------
+    def my_profile(self, user: dict[str, Any]) -> dict[str, Any]:
+        """The account's stored file as editable text (`stored`), plus how the profile
+        that scores its board reads (`summary`) and what it scores."""
+        stored = self.accounts.profile(user["id"])
+        if stored is None:
+            return {"stored": None, **self.score_counts(user)}
+        try:
+            text = jobboard.decode_upload(stored["filename"], stored["content"])
+        except jobboard.ProfileError as exc:
+            text = None
+            error = str(exc)
+        else:
+            error = None
+        editable = Path(stored["filename"]).suffix.lower() in (".md", ".txt")
+        return {"stored": {"filename": stored["filename"], "text": text, "editable": editable,
+                            "error": error, "sha256": stored["sha256"],
+                            "updated": dt.datetime.fromtimestamp(stored["updated_at"]).isoformat(
+                                timespec="seconds")},
+                **self.score_counts(user)}
+
+    def save_my_profile(self, user: dict[str, Any], body: ProfileUpload) -> dict[str, Any]:
         try:
             data = base64.b64decode(body.content_base64, validate=True)
         except (ValueError, binascii.Error):
             raise HTTPException(422, "The upload is not valid base64") from None
+        if len(data) > MAX_PROFILE_BYTES:
+            raise HTTPException(413, "Profiles are limited to 2 MB")
         try:
-            profile = jobboard.load_profile(body.filename, data)
+            jobboard.load_profile(body.filename, data)  # refuse what cannot be scored
         except jobboard.ProfileError as exc:
             raise HTTPException(422, str(exc)) from None
-        with self.lock:
-            self.uploaded = (_sha(data), profile)
-            self._scores = None
-        return self.resume_state()
+        self.accounts.save_profile(user["id"], body.filename, data)
+        return self.my_profile(user)
 
-    def clear_resume(self) -> dict[str, Any]:
-        with self.lock:
-            self.uploaded = None
-            self._scores = None
-        return self.resume_state()
+    def delete_my_profile(self, user: dict[str, Any]) -> dict[str, Any]:
+        self.accounts.delete_profile(user["id"])
+        return self.my_profile(user)
 
-    def resume_state(self) -> dict[str, Any]:
-        scores, profile = self.scores()
-        ranked = [s for s in scores.values() if not s["insufficient"]]
-        return {"profile": profile, "threshold": pipeline.FIT_THRESHOLD,
-                "scored": len(ranked),
-                "proceed": sum(1 for s in ranked if s["score"] >= pipeline.FIT_THRESHOLD),
-                "thin": sum(1 for s in scores.values() if s["insufficient"])}
+    # -- Pro: a tailored resume built from the account's own profile ------------------
+    def build_requirements(self, user: dict[str, Any]) -> dict[str, Any]:
+        """What a build needs, and what is still missing, for this account."""
+        missing: list[str] = []
+        stored = self.accounts.profile(user["id"])
+        text = None
+        if stored is None:
+            missing.append("profile")
+        else:
+            try:
+                text = jobboard.decode_upload(stored["filename"], stored["content"])
+            except jobboard.ProfileError:
+                missing.append("profile")
+        if text is not None and not jobboard.is_master(text):
+            missing.append("master")
+        elif text is not None and not resume_kit.has_kit(text.splitlines()):
+            missing.append("kit")
+        header = self.accounts.header(user["id"])
+        if not header or not header.get("name"):
+            missing.append("header")
+        return {"pro": user["is_pro"], "missing": missing, "ready": user["is_pro"] and not missing,
+                "text": text, "header": header}
+
+    def build_resume(self, user: dict[str, Any], job_id: str, override_low_fit: bool = False
+                     ) -> dict[str, Any]:
+        """Run the real pipeline on this account's master profile and a template generated
+        from its own resume kit and header; keep the result (PDF included) in its account."""
+        if not user["is_pro"]:
+            raise HTTPException(403, "Tailored resumes are a Pro feature. Request Pro on your "
+                                     "profile page.")
+        path = self.job_path(job_id)
+        needs = self.build_requirements(user)
+        messages = {"profile": "Upload your master profile first.",
+                    "master": "Building a resume needs a tagged master profile ([V] and [NO] "
+                              "lines), not a plain resume.",
+                    "kit": "Your master profile needs a resume kit (section 9) with your "
+                           "roles, projects and bullet bank.",
+                    "header": "Add your resume header (at least your name) first."}
+        if needs["missing"]:
+            raise HTTPException(422, messages[needs["missing"][0]])
+        if not self.build_lock.acquire(blocking=False):
+            raise HTTPException(409, "Another resume is being built right now. Try again in a "
+                                     "minute.")
+        try:
+            with tempfile.TemporaryDirectory(prefix="vouch-build-") as tmp:
+                root = Path(tmp)
+                (root / "target_jobs").mkdir()
+                jd = root / "target_jobs" / path.name
+                jd.write_bytes(path.read_bytes())
+                master = root / "master.md"
+                master.write_text(needs["text"], encoding="utf-8")
+                try:
+                    kit = pipeline.load_kit(pipeline.parse_master(master))
+                    header = user_template.clean_header(needs["header"])
+                    template = user_template.build_template(header, kit)
+                except (pipeline.PipelineError, user_template.TemplateInputError) as exc:
+                    raise HTTPException(422, str(exc)) from None
+                (root / "template.tex").write_text(template, encoding="utf-8")
+                argv = [str(jd), "--workspace", str(root), "--master", str(master),
+                        "--template", str(root / "template.tex"), "--output-dir",
+                        str(root / "out")]
+                if override_low_fit:
+                    argv.append("--override-low-fit")
+                log: list[str] = []
+                code = pipeline.run(argv, which=self.which, runner=self.runner, out=log.append)
+                found = [p for p in (root / "out").glob("*_analysis.json")
+                         if not p.name.endswith("_gap_analysis.json")]
+                analysis = _read_json(found[0]) if found else {}
+                base = found[0].name[:-len("_analysis.json")] if found else None
+                resume = (analysis or {}).get("resume") or {}
+                fit = (analysis or {}).get("fit") or {}
+                pdf_path = root / "out" / f"{base}_resume.pdf" if base else None
+                verified = resume.get("status") == "verified" and pdf_path is not None \
+                    and pdf_path.is_file()
+                report = root / "out" / f"{base}_report.md" if base else None
+                summary = {
+                    "exit_code": code, "outcome": EXIT_MEANINGS.get(code, f"exit {code}"),
+                    "verdict": (analysis or {}).get("verdict"),
+                    "fit_score": (analysis or {}).get("fit_score"),
+                    "profile_fit": fit.get("profile_fit"), "resume_fit": fit.get("resume_fit"),
+                    "hard_requirement_flags": fit.get("hard_requirement_flags", []),
+                    "work_authorization_note": fit.get("work_authorization_note"),
+                    "role_family": (analysis or {}).get("role_family"),
+                    "resume_status": resume.get("status"), "reason": resume.get("reason"),
+                    "gates": {k: v.get("status") for k, v in
+                              (resume.get("build_gates") or {}).items()},
+                    "override_low_fit": override_low_fit,
+                    "log_tail": [line for line in log if not line.startswith("Master profile:")][-12:]}
+                job = next((j for j in self.index()["jobs"] if j["id"] == job_id), {})
+                self.accounts.save_build(
+                    user["id"], job_id, job.get("title") or job_id, job.get("company") or "",
+                    "verified" if verified else (resume.get("status") or summary["outcome"]),
+                    summary, pdf_path.read_bytes() if verified else None,
+                    report.read_text(encoding="utf-8") if report and report.is_file() else None)
+        finally:
+            self.build_lock.release()
+        return self.build_view(user, job_id)
+
+    def build_view(self, user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
+        build = self.accounts.build(user["id"], job_id)
+        if build is None:
+            return None
+        return {"job_id": job_id, "title": build["title"], "company": build["company"],
+                "status": build["status"], "summary": build["summary"],
+                "has_pdf": build["pdf"] is not None, "has_report": bool(build["report"]),
+                "created": dt.datetime.fromtimestamp(build["created_at"]).isoformat(
+                    timespec="seconds")}
+
+    # -- admin console ---------------------------------------------------------------
+    def admin_overview(self) -> dict[str, Any]:
+        def when(ts: float | None) -> str | None:
+            return dt.datetime.fromtimestamp(ts).isoformat(timespec="seconds") if ts else None
+        users = [{**u, "created_at": when(u["created_at"])} for u in self.accounts.list_users()]
+        requests = [{**r, "created_at": when(r["created_at"]), "decided_at": when(r["decided_at"])}
+                    for r in self.accounts.list_requests(status=None)]
+        return {"users": users, "requests": requests,
+                "pending": sum(1 for r in requests if r["status"] == "pending"),
+                "database": self.accounts.backend}
 
     def outputs_by_job(self) -> dict[str, dict[str, Any]]:
         """Latest analysis per job description, keyed by its workspace-relative path."""
@@ -470,12 +691,15 @@ class Studio:
         return pipeline.safe_output_path(self.outputs, f"{base}_{suffix}")
 
     # -- jobs ----------------------------------------------------------------
-    def list_jobs(self, q: str = "", region: str = "", level: str = "", source: str = "",
-                  verdict: str = "", tailored: bool = False, min_score: int | None = None,
-                  sort: str = "match", offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    def list_jobs(self, user: dict[str, Any] | None, q: str = "", region: str = "",
+                  level: str = "", source: str = "", verdict: str = "", tailored: bool = False,
+                  min_score: int | None = None, sort: str = "match", offset: int = 0,
+                  limit: int = 50) -> dict[str, Any]:
         index = self.index()
-        scores, profile = self.scores()
-        outputs = self.outputs_by_job()
+        scores, profile = self.scores(user)
+        admin = bool(user and user.get("is_admin"))
+        outputs = self.outputs_by_job() if admin else {}  # the admin's own tailoring runs
+        tailored = tailored and admin
         needle = q.casefold().strip()
         levels = {name for name in level.split(",") if name}  # one level or several
         rows = []
@@ -493,7 +717,8 @@ class Studio:
             view["requirement_count"] = score["requirements"] if score else None
             view["file"] = job["file"]
             out = outputs.get(f"target_jobs/{job['file']}")
-            view["tailored"] = out
+            if admin:
+                view["tailored"] = out
             view["verdict_key"] = ("proceed" if view["verdict"] == pipeline.VERDICT_PROCEED else
                                    "low_fit" if view["verdict"] else
                                    "thin" if view["insufficient"] else
@@ -514,7 +739,7 @@ class Studio:
         rows.sort(key=lambda r: r["id"])
         if sort == "recent":  # newest first; undated last (stable sorts keep id order)
             rows.sort(key=lambda r: r["posted"] or "", reverse=True)
-        elif sort == "tailored":
+        elif sort == "tailored" and admin:
             rows.sort(key=lambda r: r["tailored"]["updated"] if r["tailored"] else "",
                       reverse=True)
         elif sort == "company":
@@ -525,21 +750,28 @@ class Studio:
             rows.sort(key=lambda r: (r["rank"] is None, -(r["rank"] or 0), -(r["score"] or 0)))
         limit = max(1, min(limit, PAGE_SIZE_MAX))
         return {"total": len(index["jobs"]), "matching": len(rows), "offset": offset,
+                "scorable": sum(1 for j in index["jobs"] if jobboard.has_enough_detail(j)),
                 "limit": limit, "jobs": rows[offset:offset + limit],
                 "facets": {k: dict(sorted(v.items())) for k, v in facets.items()},
                 "profile": profile, "index_generated": index.get("generated")}
 
-    def job_detail(self, job_id: str) -> dict[str, Any]:
+    def job_detail(self, job_id: str, user: dict[str, Any]) -> dict[str, Any]:
         path = self.job_path(job_id)
         job = next((j for j in self.index()["jobs"] if j["id"] == job_id), None)
         view = jobboard.public_job(job) if job else {"id": job_id, "title": job_id}
-        scores, _profile = self.scores(use_upload=False)  # the skill gate tailoring uses
-        view["board_score"] = scores.get(job_id)
+        mine, profile = self.scores(user)
+        view["my_score"] = mine.get(job_id)
+        view["profile"] = profile
+        view["my_build"] = self.build_view(user, job_id)
         view["file"] = path.name
         view["text"] = path.read_text(encoding="utf-8", errors="replace")
-        view["results"] = self.results(job_id)
-        active = self.active
-        view["active_task"] = active.view(False) if active and active.job_id == job_id else None
+        if user.get("is_admin"):  # tailoring runs on the workspace master profile
+            gate, _profile = self.scores(user, workspace=True)
+            view["board_score"] = gate.get(job_id)
+            view["results"] = self.results(job_id)
+            active = self.active
+            view["active_task"] = active.view(False) if active and active.job_id == job_id \
+                else None
         return view
 
     def save_upload(self, body: UploadRequest) -> dict[str, Any]:
@@ -812,8 +1044,13 @@ class Studio:
         saved["changes"] = (check["summary"] or {}).get("changes")
         return saved
 
-    def meta(self) -> dict[str, Any]:
+    def meta(self, user: dict[str, Any]) -> dict[str, Any]:
         index = self.index()
+        out = {"jobs": len(index["jobs"]), "index_generated": index.get("generated"),
+               "threshold": pipeline.FIT_THRESHOLD, "levels": list(jobboard.LEVELS),
+               "min_skill_requirements": jobboard.MIN_SKILL_REQUIREMENTS, "user": user}
+        if not user.get("is_admin"):
+            return out
         tools = {name: bool(self.which(name)) for name in ("pdflatex", "pdftotext", "pdfinfo")}
         try:
             master = self.master_path().name
@@ -821,13 +1058,17 @@ class Studio:
             master = None
             tools["master_error"] = str(exc)
         active = self.active
-        return {"workspace": self.workspace.name, "jobs": len(index["jobs"]),
-                "index_generated": index.get("generated"), "tools": tools,
-                "master": master, "template": self.template_path().name,
-                "threshold": pipeline.FIT_THRESHOLD, "fetch_sources": list(FETCH_SOURCES),
-                "levels": list(jobboard.LEVELS),
-                "min_skill_requirements": jobboard.MIN_SKILL_REQUIREMENTS,
+        return {**out, "workspace": self.workspace.name, "tools": tools, "master": master,
+                "pending_requests": len(self.accounts.list_requests()),
+                "template": self.template_path().name, "fetch_sources": list(FETCH_SOURCES),
                 "active_task": active.view(False) if active else None}
+
+    def public_stats(self) -> dict[str, Any]:
+        """What the home page may show anyone: counts about the board, nothing personal."""
+        jobs = self.index()["jobs"]
+        return {"jobs": len(jobs), "companies": len({j["company"] for j in jobs if j["company"]}),
+                "scorable": sum(1 for j in jobs if jobboard.has_enough_detail(j)),
+                "threshold": pipeline.FIT_THRESHOLD}
 
 
 def _profile_summary(text: str) -> tuple[dict[str, Any] | None, list[str], list[str]]:
@@ -893,6 +1134,9 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' 
        "form-action 'none'; frame-ancestors 'self'")
 
 
+PAGES = frozenset({"/", "/app", "/login", "/signup"})
+
+
 def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
                allowed_hosts: frozenset[str] = LOCAL_HOSTS) -> FastAPI:
     app = FastAPI(title="Vouch Studio", docs_url=None, redoc_url=None, openapi_url=None)
@@ -916,11 +1160,12 @@ def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
-        if not request.url.path.startswith("/api/files/"):
+        pdf = request.url.path.startswith("/api/files/") or request.url.path.endswith("/resume.pdf")
+        if not pdf:
             response.headers["Content-Security-Policy"] = CSP  # PDF viewers need none
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path == "/" or request.url.path.startswith("/static/"):
+        elif request.url.path in PAGES or request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache"  # revalidate: a UI edit shows at once
         return response
 
@@ -932,69 +1177,210 @@ def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
     async def pipeline_error(_request: Request, exc: pipeline.PipelineError):
         return JSONResponse({"detail": str(exc)}, 500 if exc.exit_code == 5 else 422)
 
+    @app.exception_handler(accounts.AccountError)
+    async def account_error(_request: Request, exc: accounts.AccountError):
+        return JSONResponse({"detail": str(exc)}, exc.status)
+
+    # -- who is asking ---------------------------------------------------------
+    def current_user(request: Request) -> dict[str, Any] | None:
+        return studio.accounts.user_for_session(request.cookies.get(SESSION_COOKIE))
+
+    def require_user(request: Request) -> dict[str, Any]:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(401, "Log in to continue")
+        return user
+
+    def require_admin(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+        if not user["is_admin"]:
+            raise HTTPException(403, "Only the workspace owner can do this")
+        return user
+
+    admin_only = [Depends(require_admin)]
+
+    def client_ip(request: Request) -> str:
+        return request.client.host if request.client else "unknown"
+
+    def start_session(request: Request, response: Response, user: dict[str, Any]) -> None:
+        token = studio.accounts.create_session(user["id"])
+        response.set_cookie(SESSION_COOKIE, token, max_age=accounts.SESSION_SECONDS,
+                            httponly=True, samesite="lax", path="/",
+                            secure=request.url.scheme == "https")
+
+    # -- accounts --------------------------------------------------------------
+    @app.post("/api/auth/signup", status_code=201)
+    def signup(body: SignupRequest, request: Request, response: Response):
+        key = f"ip:{client_ip(request)}"
+        studio.accounts.signup_throttle.check(key)
+        studio.accounts.signup_throttle.fail(key)  # every sign-up counts toward the limit
+        user = studio.accounts.create_user(body.email, body.password, body.name)
+        start_session(request, response, user)
+        return {"user": user}
+
+    @app.post("/api/auth/login")
+    def login(body: LoginRequest, request: Request, response: Response):
+        keys = (f"ip:{client_ip(request)}", f"email:{accounts.normalize_email(body.email)}")
+        studio.accounts.login_throttle.check(*keys)
+        user = studio.accounts.authenticate(body.email, body.password)
+        if user is None:
+            studio.accounts.login_throttle.fail(*keys)
+            raise HTTPException(401, "That email and password don't match an account.")
+        studio.accounts.login_throttle.reset(keys[1])
+        start_session(request, response, user)
+        return {"user": user}
+
+    @app.post("/api/auth/logout")
+    def logout(request: Request, response: Response):
+        studio.accounts.end_session(request.cookies.get(SESSION_COOKIE))
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"ok": True}
+
+    @app.get("/api/me")
+    def me(user: dict[str, Any] = Depends(require_user)):
+        return {"user": user, "pro_request": studio.accounts.latest_request(user["id"])}
+
+    @app.get("/api/me/resume-header")
+    def my_header(user: dict[str, Any] = Depends(require_user)):
+        return {"header": studio.accounts.header(user["id"]),
+                "build": {k: v for k, v in studio.build_requirements(user).items()
+                          if k not in ("text", "header")}}
+
+    @app.post("/api/me/resume-header")
+    def save_my_header(body: ResumeHeader, user: dict[str, Any] = Depends(require_user)):
+        try:
+            header = user_template.clean_header(body.model_dump())
+        except user_template.TemplateInputError as exc:
+            raise HTTPException(422, str(exc)) from None
+        studio.accounts.save_header(user["id"], header)
+        return my_header(user)
+
+    @app.post("/api/me/pro-request")
+    def request_pro(body: ProRequest, user: dict[str, Any] = Depends(require_user)):
+        return {"pro_request": studio.accounts.request_pro(user["id"], body.note)}
+
+    # -- Pro builds (the account's own profile, never the workspace files) ------------
+    @app.get("/api/builds")
+    def builds(user: dict[str, Any] = Depends(require_user)):
+        return {"builds": [{k: v for k, v in b.items()} for b in
+                           studio.accounts.builds(user["id"])]}
+
+    @app.post("/api/builds/{job_id}")
+    def build(job_id: str, body: BuildRequest | None = None,
+              user: dict[str, Any] = Depends(require_user)):
+        return {"build": studio.build_resume(user, job_id, (body or BuildRequest()).override_low_fit)}
+
+    @app.get("/api/builds/{job_id}/resume.pdf")
+    def build_pdf(job_id: str, user: dict[str, Any] = Depends(require_user)):
+        found = studio.accounts.build(user["id"], job_id)
+        if not found or found["pdf"] is None:
+            raise HTTPException(404, "No verified resume for this job yet")
+        name = f"{pipeline.slugify(found['company'] or 'resume')}_{pipeline.slugify(found['title'])}.pdf"
+        return Response(found["pdf"], media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{name}"'})
+
+    @app.get("/api/builds/{job_id}/report")
+    def build_report(job_id: str, user: dict[str, Any] = Depends(require_user)):
+        found = studio.accounts.build(user["id"], job_id)
+        if not found or not found["report"]:
+            raise HTTPException(404, "No report for this job yet")
+        return Response(found["report"], media_type="text/markdown; charset=utf-8")
+
+    # -- admin console ----------------------------------------------------------------
+    @app.get("/api/admin/overview", dependencies=admin_only)
+    def admin_overview():
+        return studio.admin_overview()
+
+    @app.post("/api/admin/requests/{request_id}/{decision}")
+    def decide(request_id: int, decision: str, admin: dict[str, Any] = Depends(require_admin)):
+        if decision not in ("approve", "decline"):
+            raise HTTPException(404, "Unknown decision")
+        studio.accounts.decide_request(request_id, decision == "approve", admin["id"])
+        return studio.admin_overview()
+
+    @app.post("/api/admin/users/{user_id}/plan", dependencies=admin_only)
+    def change_plan(user_id: int, body: PlanChange):
+        studio.accounts.set_plan(user_id, body.plan)
+        return studio.admin_overview()
+
+    @app.get("/api/me/profile")
+    def my_profile(user: dict[str, Any] = Depends(require_user)):
+        return studio.my_profile(user)
+
+    @app.post("/api/me/profile")
+    def save_my_profile(body: ProfileUpload, user: dict[str, Any] = Depends(require_user)):
+        return studio.save_my_profile(user, body)
+
+    @app.post("/api/me/profile/delete")
+    def delete_my_profile(user: dict[str, Any] = Depends(require_user)):
+        return studio.delete_my_profile(user)
+
+    @app.post("/api/me/delete")
+    def delete_me(body: PasswordConfirm, response: Response,
+                  user: dict[str, Any] = Depends(require_user)):
+        if studio.accounts.authenticate(user["email"], body.password) is None:
+            raise HTTPException(403, "That password is not correct.")
+        studio.accounts.delete_user(user["id"])  # sessions and the stored profile go with it
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"deleted": True}
+
+    @app.get("/api/stats")
+    def stats():
+        return studio.public_stats()
+
+    # -- the board (any signed-in account) ---------------------------------------
     @app.get("/api/meta")
-    def meta():
-        return studio.meta()
+    def meta(user: dict[str, Any] = Depends(require_user)):
+        return studio.meta(user)
 
     @app.get("/api/jobs")
     def jobs(q: str = Query("", max_length=200), region: str = "", level: str = "",
              source: str = "", verdict: str = "", tailored: bool = False,
              min_score: int | None = Query(None, ge=0, le=100), sort: str = "match",
-             offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=PAGE_SIZE_MAX)):
-        return studio.list_jobs(q, region, level, source, verdict, tailored, min_score, sort,
-                                offset, limit)
+             offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=PAGE_SIZE_MAX),
+             user: dict[str, Any] = Depends(require_user)):
+        return studio.list_jobs(user, q, region, level, source, verdict, tailored, min_score,
+                                sort, offset, limit)
 
-    @app.get("/api/resume")
-    def resume():
-        return studio.resume_state()
+    @app.get("/api/jobs/{job_id}")
+    def job(job_id: str, user: dict[str, Any] = Depends(require_user)):
+        return studio.job_detail(job_id, user)
 
-    @app.post("/api/resume")
-    def set_resume(body: ResumeUpload):
-        return studio.set_resume(body)
-
-    @app.post("/api/resume/clear")
-    def clear_resume():
-        return studio.clear_resume()
-
-    @app.post("/api/jobs/fetch", status_code=202)
+    # -- the workspace (admin only: it runs on the owner's files) -----------------
+    @app.post("/api/jobs/fetch", status_code=202, dependencies=admin_only)
     def fetch(body: FetchRequest):
         return studio.fetch(body).view(False)
 
-    @app.post("/api/jobs/upload", status_code=201)
+    @app.post("/api/jobs/upload", status_code=201, dependencies=admin_only)
     def upload(body: UploadRequest):
         return studio.save_upload(body)
 
-    @app.get("/api/jobs/{job_id}")
-    def job(job_id: str):
-        return studio.job_detail(job_id)
-
-    @app.post("/api/tailor/{job_id}", status_code=202)
+    @app.post("/api/tailor/{job_id}", status_code=202, dependencies=admin_only)
     def tailor(job_id: str, body: TailorRequest | None = None):
         return studio.tailor(job_id, body or TailorRequest()).view(False)
 
-    @app.get("/api/tailor/{job_id}")
+    @app.get("/api/tailor/{job_id}", dependencies=admin_only)
     def results(job_id: str):
         return studio.results(job_id)
 
-    @app.get("/api/provenance/{job_id}")
+    @app.get("/api/provenance/{job_id}", dependencies=admin_only)
     def provenance(job_id: str):
         return studio.provenance(job_id)
 
-    @app.get("/api/fit/{job_id}")
+    @app.get("/api/fit/{job_id}", dependencies=admin_only)
     def fit(job_id: str):
         return studio.fit_report(job_id)
 
-    @app.get("/api/briefing/{job_id}")
+    @app.get("/api/briefing/{job_id}", dependencies=admin_only)
     def briefing(job_id: str):
         return studio.briefing(job_id)
 
-    @app.get("/api/files/{job_id}/{name}")
+    @app.get("/api/files/{job_id}/{name}", dependencies=admin_only)
     def files(job_id: str, name: str):
         path, media = studio.file_for(job_id, name)
         return FileResponse(path, media_type=media, filename=path.name,
                             content_disposition_type="inline")
 
-    @app.get("/api/tasks")
+    @app.get("/api/tasks", dependencies=admin_only)
     def tasks():
         return {"active": studio.active.view(False) if studio.active else None,
                 "recent": [t.view(False) for t in sorted(studio.tasks.values(),
@@ -1006,11 +1392,11 @@ def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
             raise HTTPException(404, "Unknown task")
         return task
 
-    @app.get("/api/tasks/{task_id}")
+    @app.get("/api/tasks/{task_id}", dependencies=admin_only)
     def task_view(task_id: str):
         return get_task(task_id).view()
 
-    @app.get("/api/tasks/{task_id}/events")
+    @app.get("/api/tasks/{task_id}/events", dependencies=admin_only)
     def task_events(task_id: str):
         task = get_task(task_id)
 
@@ -1034,24 +1420,41 @@ def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
 
     for kind in ("profile", "template"):
         def register(kind: str = kind) -> None:
-            @app.get(f"/api/{kind}", name=f"read_{kind}")
+            @app.get(f"/api/{kind}", name=f"read_{kind}", dependencies=admin_only)
             def read():
                 return studio.read_source(kind)
 
-            @app.post(f"/api/{kind}/validate", name=f"validate_{kind}")
+            @app.post(f"/api/{kind}/validate", name=f"validate_{kind}", dependencies=admin_only)
             def validate(body: SourceCheck):
                 current = studio.read_source(kind)["text"]
                 return studio.describe_source(kind, body.text.replace("\r\n", "\n"), current)
 
-            @app.post(f"/api/{kind}", name=f"save_{kind}")
+            @app.post(f"/api/{kind}", name=f"save_{kind}", dependencies=admin_only)
             def save(body: SourceUpdate):
                 return studio.save_source(kind, body)
 
         register()
 
+    # -- pages -------------------------------------------------------------------
+    def page(name: str) -> FileResponse:
+        return FileResponse(static_dir / name, media_type="text/html")
+
     @app.get("/", include_in_schema=False)
-    def index():
-        return FileResponse(static_dir / "index.html", media_type="text/html")
+    def home():
+        return page("home.html")
+
+    @app.get("/signup", include_in_schema=False)
+    @app.get("/login", include_in_schema=False)
+    def auth_page(request: Request):
+        if current_user(request) is not None:
+            return RedirectResponse("/app", status_code=303)
+        return page("auth.html")
+
+    @app.get("/app", include_in_schema=False)
+    def application(request: Request):
+        if current_user(request) is None:
+            return RedirectResponse("/login", status_code=303)
+        return page("index.html")
 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -1069,7 +1472,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--workspace", type=Path, default=ROOT)
     parser.add_argument("--open", action="store_true", help="open the browser when ready")
+    parser.add_argument("--make-admin", metavar="EMAIL",
+                        help="give an existing account the workspace tools, then exit")
     args = parser.parse_args(argv)
+    if args.make_admin:
+        db = Path(args.workspace).resolve() / ".studio" / "vouch.db"
+        try:
+            user = accounts.Accounts(db).set_admin(args.make_admin)
+        except accounts.AccountError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(f"{user['email']} is now the workspace admin (tailoring, fetching, editors).")
+        return 0
     studio = Studio(args.workspace)
     print(f"Indexing jobs in {studio.target_dir} ...", flush=True)
     studio.index()
@@ -1077,6 +1491,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.open:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     print(f"Vouch Studio on {url}  (Ctrl+C to stop)", flush=True)
+    if not any(True for _ in studio.accounts._run("SELECT 1 FROM users WHERE is_admin = 1")):
+        print("No admin account yet: sign up, then run ./run_ui.sh --make-admin YOUR_EMAIL "
+              "to unlock tailoring and fetching.", flush=True)
     uvicorn.run(create_app(studio), host=DEFAULT_HOST, port=args.port, log_level="warning")
     return 0
 

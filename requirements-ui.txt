@@ -3,3 +3,4 @@
 fastapi==0.162.0
 uvicorn==0.54.0
 httpx==0.28.1  # fastapi.testclient, used by tests/test_server.py
+psycopg[binary]==3.2.10  # accounts on Postgres (Neon) when DATABASE_URL is set

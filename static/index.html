@@ -5,21 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Vouch Studio</title>
-  <link rel="stylesheet" href="/static/studio.css?v=white-2">
-  <script src="/static/studio.js?v=white-2" defer></script>
+  <link rel="stylesheet" href="/static/studio.css?v=pro-1">
+  <script src="/static/studio.js?v=pro-1" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">Vouch<span>Studio</span></div>
+    <a class="brand" href="/">Vouch</a>
     <nav class="nav" aria-label="Main">
       <a href="#/jobs" data-nav="jobs">Jobs</a>
-      <a href="#/resume" data-nav="resume">Your resume</a>
-      <a href="#/job" data-nav="job">Workspace</a>
-      <a href="#/profile" data-nav="profile">Profile Studio</a>
+      <a href="#/me" data-nav="me">Your profile</a>
+      <a href="#/job" data-nav="job" data-admin hidden>Workspace</a>
+      <a href="#/profile" data-nav="profile" data-admin hidden>Profile Studio</a>
+      <a href="#/admin" data-nav="admin" data-admin hidden>Admin <span id="admin-badge" class="badge" hidden></span></a>
     </nav>
     <div class="status">
       <button type="button" id="task-pill" class="task-pill hidden"></button>
-      <span id="tools" class="tools row"></span>
+      <span id="tools" class="tools row" data-admin hidden></span>
+      <span id="user-menu" class="user-menu"></span>
     </div>
   </header>
 

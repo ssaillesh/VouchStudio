@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Vouch: your account</title>
+  <link rel="stylesheet" href="/static/studio.css?v=pro-1">
+  <script src="/static/site.js?v=pro-1" defer></script>
+</head>
+<body class="site" data-page="auth">
+  <header class="topbar site-bar">
+    <a class="brand" href="/">Vouch</a>
+  </header>
+
+  <main class="auth-main">
+    <section class="auth-card reveal" aria-labelledby="auth-title">
+      <p class="eyebrow" id="auth-eyebrow">Create your account</p>
+      <h1 id="auth-title">Start with your resume.</h1>
+      <p class="lede" id="auth-lede">Make an account, upload your resume or master profile, and every
+        job on the board is scored for you.</p>
+
+      <form id="auth-form" novalidate>
+        <label class="field" id="name-field"><span>Name <span class="faint">(optional)</span></span>
+          <input type="text" id="auth-name" name="name" autocomplete="name" maxlength="80">
+        </label>
+        <label class="field">Email
+          <input type="email" id="auth-email" name="email" autocomplete="email" required maxlength="254">
+        </label>
+        <label class="field">Password
+          <input type="password" id="auth-password" name="password" autocomplete="new-password"
+            required minlength="8" maxlength="256">
+          <span class="hint" id="password-hint">At least 8 characters.</span>
+        </label>
+        <p class="form-error" id="auth-error" role="alert"></p>
+        <button class="btn primary large block" type="submit" id="auth-submit">Create account</button>
+      </form>
+
+      <p class="auth-switch" id="auth-switch">Already have an account? <a href="/login">Log in</a></p>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Vouch: jobs scored against your evidence</title>
+  <meta name="description" content="Upload your resume or a tagged master profile and see every open role scored against the evidence you have.">
+  <link rel="stylesheet" href="/static/studio.css?v=pro-1">
+  <script src="/static/site.js?v=pro-1" defer></script>
+</head>
+<body class="site" data-page="home">
+  <header class="topbar site-bar">
+    <a class="brand" href="/">Vouch</a>
+    <nav class="site-actions" id="site-actions" aria-label="Account">
+      <a class="btn ghost" href="/login">Log in</a>
+      <a class="btn primary" href="/signup">Create account</a>
+    </nav>
+  </header>
+
+  <main class="site-main">
+    <section class="hero reveal">
+      <p class="eyebrow">Vouch · evidence-based job matching</p>
+      <h1>Find the jobs your experience actually covers.</h1>
+      <p class="lede">Upload your resume or a tagged master profile. Vouch reads the requirements of
+        every posting on the board and scores each one against the evidence you have, so you see
+        where you fit, and what is missing, before you apply.</p>
+      <div class="hero-actions">
+        <a class="btn primary large" href="/signup" id="hero-primary">Create a free account</a>
+        <a class="btn large" href="/login" id="hero-secondary">Log in</a>
+      </div>
+      <p class="hero-stats" id="hero-stats" aria-live="polite">Open roles across the US and Canada</p>
+    </section>
+
+    <section class="preview reveal" aria-label="What a scored job looks like">
+      <div class="window">
+        <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span>
+          <em>vouch · your board</em></div>
+        <div class="window-body">
+          <article class="job-row demo">
+            <span class="score proceed">81<small>9 reqs</small></span>
+            <div class="grow">
+              <div class="title">Machine Learning Engineer, Link</div>
+              <div class="sub">Stripe · New York City · posted 2026-09-21</div>
+              <div class="tags"><span class="chip pass tag">65+</span><span class="chip accent tag">US</span>
+                <span class="chip tag">Mid or unspecified</span><span class="chip tag">Greenhouse</span></div>
+              <div class="detail">
+                <div><h4>Evidence matched</h4><div class="chips">
+                  <span class="chip pass">Machine learning</span><span class="chip pass">Python</span>
+                  <span class="chip pass">SQL</span><span class="chip pass">Statistics</span>
+                  <span class="chip pass">ETL / data pipelines</span></div></div>
+                <div><h4>Gaps</h4><div class="chips">
+                  <span class="chip">Ruby on Rails<em>missing</em></span>
+                  <span class="chip">6+ years of experience<em>unclear</em></span></div></div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="site-section">
+      <div class="section-intro reveal">
+        <p class="eyebrow">How it works</p>
+        <h2>Three steps, no guesswork.</h2>
+      </div>
+      <div class="bento steps">
+        <div class="card span-3 reveal">
+          <span class="step-num">01</span>
+          <h3 class="step-title">Upload what you have</h3>
+          <p>A plain resume works as it is: PDF, .txt or .md. A master profile with <code>[V]</code>
+            and <code>[NO]</code> tags is stricter, because lines you mark <code>[NO]</code> never count.</p>
+        </div>
+        <div class="card span-3 reveal">
+          <span class="step-num">02</span>
+          <h3 class="step-title">Every posting, read the same way</h3>
+          <p>Requirements are pulled from each description and weighted: 3 for must-haves, 2 for
+            required skills, 1 for nice-to-haves.</p>
+        </div>
+        <div class="card span-6 reveal">
+          <span class="step-num">03</span>
+          <h3 class="step-title">A score you can check</h3>
+          <p>Each job shows the evidence it matched and the gaps it found. The score is the share of
+            the posting's weight your profile backs, so a 78 tells you exactly what is behind it.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="site-section">
+      <div class="section-intro reveal">
+        <p class="eyebrow">What makes it different</p>
+        <h2>Built to be trusted.</h2>
+      </div>
+      <dl class="principles reveal">
+        <div><dt>Evidence, not keywords</dt>
+          <dd>A skill counts only when a line of your profile supports it. Knowing Docker never
+            implies Kubernetes, and AWS never implies Azure.</dd></div>
+        <div><dt>Rules, not a language model</dt>
+          <dd>Scoring is deterministic: the same profile and posting always give the same score,
+            and nothing you upload is sent to an AI service.</dd></div>
+        <div><dt>Your profile stays yours</dt>
+          <dd>It is stored with your account and used only to score jobs for you. Replace it, or
+            delete your account and everything in it, whenever you like.</dd></div>
+      </dl>
+    </section>
+
+    <section class="site-section">
+      <div class="section-intro reveal">
+        <p class="eyebrow">Plans</p>
+        <h2>Score every job. Then build the resume.</h2>
+      </div>
+      <div class="plans">
+        <div class="card reveal">
+          <span class="chip tag">Basic</span>
+          <h3>Know where you fit</h3>
+          <p>Free with every account.</p>
+          <ul class="pro-points">
+            <li>Every job on the board scored against your profile</li>
+            <li>The evidence each job matched and the gaps it found</li>
+            <li>Filters by level, region and source</li>
+            <li>Upload a resume or a tagged master profile, edit it any time</li>
+          </ul>
+          <a class="btn" href="/signup">Create an account</a>
+        </div>
+        <div class="card pro reveal">
+          <span class="chip tag pass">Pro</span>
+          <h3>A resume for every job</h3>
+          <p>Request it from your profile page; your account is switched once approved.</p>
+          <ul class="pro-points">
+            <li>A one-page resume tailored to each job, built from your master profile</li>
+            <li>Every line traced to a fact you verified; nothing invented</li>
+            <li>Checked to compile, fit one page and read cleanly in applicant tracking systems</li>
+            <li>A report of what the job asks and the top changes that would raise your fit</li>
+          </ul>
+          <a class="btn primary" href="/signup">Start with Basic, ask for Pro</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="site-section faq reveal">
+      <h2>Questions</h2>
+      <details><summary>What is a master profile?</summary>
+        <p>A Markdown file of everything you have done, one fact per line, each tagged <code>[V]</code>
+          when you can back it up or <code>[NO]</code> when you must never claim it. Vouch treats it
+          as the source of truth, so it scores more strictly than a plain resume.</p></details>
+      <details><summary>Who can see my resume?</summary>
+        <p>Only you. It is kept with your account, used to score the board for you, and never shown to
+          other accounts. Deleting your account deletes it.</p></details>
+      <details><summary>Does it write my resume for me?</summary>
+        <p>With Pro, yes. From a tagged master profile with a resume kit, Vouch picks the bullets that
+          best cover each job, builds a one-page PDF and checks it. Every line traces back to a fact
+          you marked as verified, so it never claims something you have not done.</p></details>
+      <details><summary>Which jobs are on the board?</summary>
+        <p>Public postings from company job boards (Greenhouse, Ashby and others) across the United
+          States and Canada, refreshed regularly. Listings without a full description are shown
+          but not scored.</p></details>
+    </section>
+
+    <section class="closing reveal">
+      <h2>See your matches in a few minutes.</h2>
+      <a class="btn primary large" href="/signup" id="closing-cta">Create a free account</a>
+    </section>
+  </main>
+
+  <footer class="foot site-foot">
+    <span>Vouch</span>
+    <span>Scores are coverage of a posting's asks, not a prediction of being hired.</span>
+  </footer>
+</body>
+</html>
