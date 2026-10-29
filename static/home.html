@@ -4,14 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Vouch: jobs scored against your evidence</title>
+  <title>VouchStudio: Better jobs. Smarter search.</title>
   <meta name="description" content="Upload your resume or a tagged master profile and see every open role scored against the evidence you have.">
-  <link rel="stylesheet" href="/static/studio.css?v=pro-1">
-  <script src="/static/site.js?v=pro-1" defer></script>
+  <link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/studio.css?v=brand-1">
+  <script src="/static/site.js?v=brand-1" defer></script>
 </head>
 <body class="site" data-page="home">
   <header class="topbar site-bar">
-    <a class="brand" href="/">Vouch</a>
+    <a class="brand" href="/" aria-label="VouchStudio home"><svg class="mark" viewBox="2 12 60 43" aria-hidden="true" focusable="false"><path d="M2 12H20L31 34L34.2 29.6L42.2 40.2L35.4 51.6C33.4 55.2 28.6 55.2 26.6 51.6Z"/><path d="M36.6 26.4L46.4 12H62L44.6 37.4Z"/></svg><span class="wordmark">VouchStudio</span></a>
     <nav class="site-actions" id="site-actions" aria-label="Account">
       <a class="btn ghost" href="/login">Log in</a>
       <a class="btn primary" href="/signup">Create account</a>
@@ -20,9 +22,9 @@
 
   <main class="site-main">
     <section class="hero reveal">
-      <p class="eyebrow">Vouch · evidence-based job matching</p>
+      <p class="tagline">Better jobs. Smarter search.</p>
       <h1>Find the jobs your experience actually covers.</h1>
-      <p class="lede">Upload your resume or a tagged master profile. Vouch reads the requirements of
+      <p class="lede">Upload your resume or a tagged master profile. VouchStudio reads the requirements of
         every posting on the board and scores each one against the evidence you have, so you see
         where you fit, and what is missing, before you apply.</p>
       <div class="hero-actions">
@@ -35,7 +37,7 @@
     <section class="preview reveal" aria-label="What a scored job looks like">
       <div class="window">
         <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span>
-          <em>vouch · your board</em></div>
+          <em>VouchStudio · your board</em></div>
         <div class="window-body">
           <article class="job-row demo">
             <span class="score proceed">81<small>9 reqs</small></span>
@@ -141,13 +143,13 @@
       <h2>Questions</h2>
       <details><summary>What is a master profile?</summary>
         <p>A Markdown file of everything you have done, one fact per line, each tagged <code>[V]</code>
-          when you can back it up or <code>[NO]</code> when you must never claim it. Vouch treats it
+          when you can back it up or <code>[NO]</code> when you must never claim it. VouchStudio treats it
           as the source of truth, so it scores more strictly than a plain resume.</p></details>
       <details><summary>Who can see my resume?</summary>
         <p>Only you. It is kept with your account, used to score the board for you, and never shown to
           other accounts. Deleting your account deletes it.</p></details>
       <details><summary>Does it write my resume for me?</summary>
-        <p>With Pro, yes. From a tagged master profile with a resume kit, Vouch picks the bullets that
+        <p>With Pro, yes. From a tagged master profile with a resume kit, VouchStudio picks the bullets that
           best cover each job, builds a one-page PDF and checks it. Every line traces back to a fact
           you marked as verified, so it never claims something you have not done.</p></details>
       <details><summary>Which jobs are on the board?</summary>
@@ -156,14 +158,17 @@
           but not scored.</p></details>
     </section>
 
-    <section class="closing reveal">
+    <section class="closing brand-band reveal">
+      <svg class="mark band-mark" viewBox="2 12 60 43" aria-hidden="true" focusable="false"><path d="M2 12H20L31 34L34.2 29.6L42.2 40.2L35.4 51.6C33.4 55.2 28.6 55.2 26.6 51.6Z"/><path d="M36.6 26.4L46.4 12H62L44.6 37.4Z"/></svg>
       <h2>See your matches in a few minutes.</h2>
-      <a class="btn primary large" href="/signup" id="closing-cta">Create a free account</a>
+      <p class="tagline">Better jobs. Smarter search.</p>
+      <a class="btn invert large" href="/signup" id="closing-cta">Create a free account</a>
     </section>
   </main>
 
   <footer class="foot site-foot">
-    <span>Vouch</span>
+    <a class="brand small" href="/" aria-label="VouchStudio home"><svg class="mark" viewBox="2 12 60 43" aria-hidden="true" focusable="false"><path d="M2 12H20L31 34L34.2 29.6L42.2 40.2L35.4 51.6C33.4 55.2 28.6 55.2 26.6 51.6Z"/><path d="M36.6 26.4L46.4 12H62L44.6 37.4Z"/></svg><span class="wordmark">VouchStudio</span></a>
+    <span class="tagline">Better jobs. Smarter search.</span>
     <span>Scores are coverage of a posting's asks, not a prediction of being hired.</span>
   </footer>
 </body>

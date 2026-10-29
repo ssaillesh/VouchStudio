@@ -1139,7 +1139,7 @@ PAGES = frozenset({"/", "/app", "/login", "/signup"})
 
 def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
                allowed_hosts: frozenset[str] = LOCAL_HOSTS) -> FastAPI:
-    app = FastAPI(title="Vouch Studio", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="VouchStudio", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.studio = studio
 
     @app.middleware("http")
@@ -1460,7 +1460,7 @@ def create_app(studio: Studio, static_dir: Path = STATIC_DIR,
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
-        return Response(status_code=204)
+        return FileResponse(static_dir / "brand" / "favicon.svg", media_type="image/svg+xml")
 
     return app
 
@@ -1490,7 +1490,7 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{DEFAULT_HOST}:{args.port}"
     if args.open:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    print(f"Vouch Studio on {url}  (Ctrl+C to stop)", flush=True)
+    print(f"VouchStudio on {url}  (Ctrl+C to stop)", flush=True)
     if not any(True for _ in studio.accounts._run("SELECT 1 FROM users WHERE is_admin = 1")):
         print("No admin account yet: sign up, then run ./run_ui.sh --make-admin YOUR_EMAIL "
               "to unlock tailoring and fetching.", flush=True)

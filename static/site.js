@@ -73,7 +73,7 @@ async function initHome() {
 function initAuth() {
   const login = location.pathname.startsWith('/login');
   if (login) {
-    document.title = 'Vouch: log in';
+    document.title = 'VouchStudio: log in';
     $('auth-eyebrow').textContent = 'Log in';
     $('auth-title').textContent = 'Welcome back.';
     $('auth-lede').textContent = 'Log in to see the board scored against your profile.';
@@ -82,7 +82,7 @@ function initAuth() {
     $('auth-password').autocomplete = 'current-password';
     $('auth-submit').textContent = 'Log in';
     const sw = $('auth-switch');
-    sw.replaceChildren('New to Vouch? ');
+    sw.replaceChildren('New to VouchStudio? ');
     const a = document.createElement('a');
     a.href = '/signup';
     a.textContent = 'Create an account';

@@ -1,4 +1,4 @@
-/* Vouch Studio front end.
+/* VouchStudio front end.
  *
  * Every node is built with textContent (see h()), so job descriptions, profile
  * text and engine output can never inject markup. Only http(s) links render.
@@ -326,7 +326,7 @@ async function renderJobs(view) {
 
   clear(view,
     reveal(h('header', { class: 'page-head' },
-      h('p', { class: 'eyebrow' }, 'Vouch · job board'),
+      h('p', { class: 'eyebrow' }, 'VouchStudio · job board'),
       h('h1', {}, 'Every open role, scored against your experience.'),
       h('p', { class: 'lede' }, 'Browse every role and level across the US and Canada. Each job gets an ',
         'evidence-based fit score from your profile; open one to see what it matched and what is missing.'))),
@@ -585,7 +585,7 @@ async function renderMe(view) {
   const faq = (q, a) => h('details', {}, h('summary', {}, q), h('p', {}, a));
   clear(view,
     reveal(h('header', { class: 'page-head' },
-      h('p', { class: 'eyebrow' }, 'Vouch · your profile'),
+      h('p', { class: 'eyebrow' }, 'VouchStudio · your profile'),
       h('h1', {}, 'See every job through your own evidence.'),
       h('p', { class: 'lede' }, 'Upload your resume or a tagged master profile. It is kept with your account, ',
         'used only to score the board for you, and never shown to anyone else.'))),
@@ -843,7 +843,7 @@ async function renderAdmin(view) {
   };
   clear(view,
     reveal(h('header', { class: 'page-head' },
-      h('p', { class: 'eyebrow' }, 'Vouch · admin'),
+      h('p', { class: 'eyebrow' }, 'VouchStudio · admin'),
       h('h1', {}, 'Accounts and Pro requests.'),
       h('p', { class: 'lede' }, 'Approve a request to switch that account from Basic to Pro, or change any plan directly.'))),
     box);

@@ -1,4 +1,4 @@
-/* Vouch Studio: one local page for the job board and the resume engine.
+/* VouchStudio: one local page for the job board and the resume engine.
  * Warm monochrome, editorial type, 1px hairlines, muted pastels for meaning only.
  * System fonts only: the CSP is 'self' and the engine never touches the network. */
 :root {
@@ -7,8 +7,8 @@
   --surface-2: #FAFAF9;
   --line: #EAEAEA;
   --line-strong: #DCDBD7;
-  --ink: #111111;
-  --ink-hover: #333333;
+  --ink: #000000;
+  --ink-hover: #262626;
   --text: #2F3437;
   --muted: #787774;
   --faint: #A5A39E;
@@ -20,6 +20,8 @@
 
   --sans: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Helvetica Neue",
           Helvetica, Arial, sans-serif;
+  --display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica,
+             Arial, sans-serif;
   --serif: ui-serif, "Iowan Old Style", Charter, "Palatino Linotype", Georgia, serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --radius: 10px;
@@ -90,10 +92,17 @@ h3 { font: 600 11px/1.4 var(--sans); text-transform: uppercase; letter-spacing: 
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
-.brand { font: 400 21px/1 var(--serif); letter-spacing: -.02em; color: var(--ink);
-         white-space: nowrap; }
-.brand span { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .12em;
-              color: var(--muted); margin-left: 6px; vertical-align: 3px; }
+/* Brand: the V mark and the VouchStudio wordmark, black on white (or inverted). */
+.mark { display: block; fill: currentColor; }
+.brand { display: inline-flex; align-items: center; gap: 9px; color: var(--ink);
+         text-decoration: none; white-space: nowrap; }
+.brand .mark { width: 26px; height: auto; flex: none; }
+.wordmark { font: 600 19px/1 var(--display); letter-spacing: -.035em; }
+.brand.small { gap: 7px; }
+.brand.small .mark { width: 19px; }
+.brand.small .wordmark { font-size: 14.5px; }
+.tagline { margin: 0; font: 500 11px/1.6 var(--sans); text-transform: uppercase;
+           letter-spacing: .32em; color: var(--muted); }
 .nav { display: flex; gap: 22px; }
 .nav a {
   padding: 17px 0; color: var(--muted); font-weight: 500; text-decoration: none;
@@ -603,6 +612,7 @@ body.site { background: var(--canvas); }
 .site-actions { display: flex; gap: 8px; align-items: center; }
 .site-main { max-width: 1040px; margin: 0 auto; padding: 0 32px 96px; }
 .hero { padding: 120px 0 72px; max-width: 860px; }
+.hero > .tagline { margin-bottom: 22px; color: var(--ink); }
 .hero h1 { font-size: clamp(42px, 6.4vw, 72px); line-height: 1.04; letter-spacing: -.04em; }
 .hero .lede { color: var(--muted); font-size: 18px; line-height: 1.6; margin: 24px 0 0;
               max-width: 640px; }
@@ -636,7 +646,17 @@ body.site { background: var(--canvas); }
 .site-section.faq { max-width: 760px; margin-top: 0; }
 .closing { margin-top: 120px; padding: 72px 0 0; border-top: 1px solid var(--line);
            display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
-.site-foot { max-width: 1040px; margin: 0 auto 48px; padding: 20px 32px 0; }
+.site-foot { max-width: 1040px; margin: 0 auto 48px; padding: 20px 32px 0; align-items: center; }
+.site-foot .tagline { font-size: 10px; color: var(--faint); }
+.brand-band { background: #000000; color: #FFFFFF; border-top: 0; border-radius: 16px;
+              padding: 72px 56px; gap: 20px; }
+.brand-band h2 { color: #FFFFFF; }
+.brand-band .tagline { color: rgba(255, 255, 255, .62); margin-bottom: 12px; }
+.band-mark { width: 60px; height: auto; margin-bottom: 8px; }
+.btn.invert { background: #FFFFFF; border-color: #FFFFFF; color: #000000; }
+.btn.invert:hover { background: #E9E9E9; border-color: #E9E9E9; }
+.btn.invert:focus-visible { outline-color: #FFFFFF; }
+.auth-mark { width: 44px; height: auto; color: var(--ink); margin-bottom: 28px; }
 .auth-main { display: flex; justify-content: center; padding: 96px 24px; }
 .auth-card { width: 100%; max-width: 420px; }
 .auth-card h1 { font-size: 40px; letter-spacing: -.035em; }
@@ -674,11 +694,13 @@ footer.foot { margin-top: 80px; padding-top: 20px; border-top: 1px solid var(--l
   .principles > div { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .window-body { padding: 4px 16px; }
   .site-actions .btn.ghost { display: none; }
+  .bar-tagline { display: none; }
+  .brand-band { padding: 48px 24px; border-radius: 12px; }
   .plans, .form-grid.four { grid-template-columns: minmax(0, 1fr); }
   .topbar { gap: 16px; padding: 0 16px; }
   .topbar .status .tools { display: none; }
   .nav { gap: 14px; overflow-x: auto; min-width: 0; scrollbar-width: none; }
-  .brand span { display: none; }
+  .topbar:not(.site-bar) .wordmark { display: none; }  /* the app's nav needs the room */
   .gates, .fit-cards { grid-template-columns: minmax(0, 1fr); }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .rec, .metric-card, .star dl { grid-template-columns: minmax(0, 1fr); }
