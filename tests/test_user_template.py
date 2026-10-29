@@ -32,8 +32,9 @@ class UserTemplateTests(unittest.TestCase):
     def test_the_base_carries_no_personal_details(self):
         base = U.BASE.read_text(encoding="utf-8")
         self.assertTrue(base.rstrip().endswith("\\begin{document}"))
-        for text in ("REDACTED", "REDACTED", "@example", "000-0000", "linkedin.com/in"):
-            self.assertNotIn(text, base)
+        self.assertNotRegex(base, r"[\w.+-]+@[\w-]+\.[\w.-]+")  # no email address
+        self.assertNotRegex(base, r"\d{3}[ .-]\d{4}")  # no phone number
+        self.assertNotIn("linkedin.com/in", base)
 
     def test_template_holds_the_accounts_header_kit_and_education(self):
         tex = U.build_template(U.clean_header(HEADER), self.kit)
