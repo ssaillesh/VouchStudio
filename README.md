@@ -70,4 +70,4 @@ python3 -m unittest discover -s tests               # engine (offline, standard 
 ## Privacy
 
 Uploaded resumes are scored on your own machine. Your master profile, template, accounts
-database, generated resumes and `.env` are all gitignored and never committed.
+database, generated resumes and `.env` are all gitignored and never committed
