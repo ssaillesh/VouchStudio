@@ -1,0 +1,33 @@
+{
+  "name": "vouchstudio-web",
+  "private": true,
+  "description": "Hosted VouchStudio: Next.js on Vercel, Neon Postgres and Cloudflare R2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/sync-static.mjs && next dev",
+    "build": "node scripts/sync-static.mjs && next build",
+    "vercel-build": "node scripts/migrate.mjs && npm run build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "engine": "python3 api/engine.py",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
+    "publish:jobs": "node --env-file-if-exists=.env scripts/publish-jobs.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1159.0",
+    "@aws-sdk/s3-request-presigner": "3.1159.0",
+    "@neondatabase/serverless": "1.2.0",
+    "next": "16.4.3",
+    "react": "19.2.9",
+    "react-dom": "19.2.9",
+    "unpdf": "1.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

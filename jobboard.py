@@ -249,6 +249,10 @@ def decode_upload(filename: str, data: bytes) -> str:
         if b"\x00" in data:
             raise ProfileError("That file is not plain text")
         text = data.decode("utf-8-sig", errors="replace")
+    return readable_text(text)
+
+
+def readable_text(text: str) -> str:
     text = pipeline.normalize_text(text)
     if len(re.findall(r"[A-Za-z]{3,}", text)) < 20:
         raise ProfileError("The file has too little readable text to score (for PDFs, this "
@@ -287,8 +291,10 @@ def resume_to_master(text: str) -> str:
     return "\n".join(out) + "\n"
 
 
-def load_profile(filename: str, data: bytes) -> Profile:
-    text = decode_upload(filename, data)
+def load_profile(filename: str, data: bytes, text: str | None = None) -> Profile:
+    """Parse an upload. `text` stands in for decoding `data`: the hosted app extracts a PDF's
+    text itself, because pdftotext is not available on Vercel."""
+    text = readable_text(text) if text is not None else decode_upload(filename, data)
     mode = "master" if is_master(text) else "resume"
     source = text if mode == "master" else resume_to_master(text)
     with tempfile.TemporaryDirectory() as tmp:

@@ -28,3 +28,12 @@ __pycache__/
 *.pyc
 .ruff_cache/
 .DS_Store
+
+# Next.js (hosted app on Vercel)
+/node_modules/
+/.next/
+/.vercel/
+/out/
+/public/static/
+next-env.d.ts
+*.tsbuildinfo

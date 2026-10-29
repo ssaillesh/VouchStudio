@@ -3,6 +3,7 @@
 
     ./run_ui.sh                       # creates .venv, starts http://127.0.0.1:8000
     ./run_ui.sh --make-admin EMAIL    # give your account the workspace tools
+    ./run_ui.sh --process-builds      # run Pro builds queued on the hosted app, then exit
 
 The engine stays on the standard library; FastAPI and uvicorn are used only here
 (see requirements-ui.txt). Every route calls the engine's own functions in-process,
@@ -79,6 +80,7 @@ import fetch_jobs
 import jobboard
 import pipeline
 import resume_kit
+import storage
 import user_template
 
 ROOT = Path(__file__).resolve().parent
@@ -411,7 +413,9 @@ class Studio:
         if admin_emails is None:  # never in git: .studio/admins.txt or VOUCH_ADMIN_EMAILS
             admin_emails = accounts.read_admin_emails(self.workspace / ".studio" / "admins.txt",
                                                       self.env if self.env is not None else None)
-        self.accounts = accounts.Accounts(db, admin_emails=admin_emails)
+        # Profiles and build PDFs go to Cloudflare R2 when R2_* is set (shared with Vercel).
+        store = None if db_path else storage.from_env(self.env if self.env is not None else None)
+        self.accounts = accounts.Accounts(db, admin_emails=admin_emails, store=store)
         self.build_lock = threading.Lock()  # one Pro build compiles at a time
 
     # -- paths ---------------------------------------------------------------
@@ -640,13 +644,34 @@ class Studio:
             self.build_lock.release()
         return self.build_view(user, job_id)
 
+    def process_builds(self, emit: Callable[[str], None] = print) -> int:
+        """Run every build the hosted app queued (it has no LaTeX); returns how many ran."""
+        done = 0
+        for queued in self.accounts.queued_builds():
+            user = self.accounts.user_by_id(queued["user_id"])
+            job_id = queued["job_id"]
+            if user is None:
+                continue
+            emit(f"Building {job_id} for {user['email']} ...")
+            try:
+                view = self.build_resume(user, job_id,
+                                         bool(queued["summary"].get("override_low_fit")))
+            except (HTTPException, accounts.AccountError, storage.StorageError) as exc:
+                reason = str(exc.detail if isinstance(exc, HTTPException) else exc)
+                self.accounts.fail_build(user["id"], job_id, reason)
+                emit(f"  failed: {reason}")
+                continue
+            emit(f"  {view['status'] if view else 'no result'}")
+            done += 1
+        return done
+
     def build_view(self, user: dict[str, Any], job_id: str) -> dict[str, Any] | None:
-        build = self.accounts.build(user["id"], job_id)
+        build = self.accounts.build(user["id"], job_id, with_pdf=False)
         if build is None:
             return None
         return {"job_id": job_id, "title": build["title"], "company": build["company"],
                 "status": build["status"], "summary": build["summary"],
-                "has_pdf": build["pdf"] is not None, "has_report": bool(build["report"]),
+                "has_pdf": build["has_pdf"], "has_report": bool(build["report"]),
                 "created": dt.datetime.fromtimestamp(build["created_at"]).isoformat(
                     timespec="seconds")}
 
@@ -1474,9 +1499,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--open", action="store_true", help="open the browser when ready")
     parser.add_argument("--make-admin", metavar="EMAIL",
                         help="give an existing account the workspace tools, then exit")
+    parser.add_argument("--process-builds", action="store_true",
+                        help="run the Pro builds queued on the hosted app, then exit")
     args = parser.parse_args(argv)
+    if args.process_builds:
+        studio = Studio(args.workspace)
+        print(f"Ran {studio.process_builds()} queued build(s).")
+        return 0
     if args.make_admin:
-        db = Path(args.workspace).resolve() / ".studio" / "vouch.db"
+        db = os.environ.get("DATABASE_URL") or Path(args.workspace).resolve() / ".studio" / "vouch.db"
         try:
             user = accounts.Accounts(db).set_admin(args.make_admin)
         except accounts.AccountError as exc:

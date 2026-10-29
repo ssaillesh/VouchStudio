@@ -405,6 +405,29 @@ class PlanTests(StudioCase):
         forced = dana.post("/api/builds/reject", json={"override_low_fit": True}, headers=HEADERS)
         self.assertEqual(forced.json()["build"]["summary"]["verdict"], P.VERDICT_REJECT)
 
+    def test_builds_queued_on_the_hosted_app_run_here_and_land_in_r2(self):
+        from test_hosting import FakeStore
+        dana = self.make_client("dana@example.com")
+        uid = dana.get("/api/me").json()["user"]["id"]
+        self.studio.accounts.set_plan(uid, "pro")
+        self.pro_ready(dana)
+        store = self.studio.accounts.store = FakeStore()
+        for job_id in ("proceed", "gone"):  # what the Vercel app writes for "Build my resume"
+            self.studio.accounts._run(
+                "INSERT INTO builds (user_id, job_id, status, summary, created_at) "
+                "VALUES (?, ?, 'queued', '{}', 0)", (uid, job_id))
+        lines: list[str] = []
+        self.assertEqual(self.studio.process_builds(lines.append), 1)
+        self.assertEqual(self.studio.accounts.queued_builds(), [])
+        self.assertIn(f"users/{uid}/builds/proceed.pdf", store.objects)
+        build = dana.get("/api/jobs/proceed").json()["my_build"]
+        self.assertEqual((build["status"], build["has_pdf"]), ("verified", True))
+        pdf = dana.get("/api/builds/proceed/resume.pdf")
+        self.assertEqual(pdf.content, store.objects[f"users/{uid}/builds/proceed.pdf"][0])
+        failed = self.studio.accounts.build(uid, "gone")
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("target_jobs/gone.md", failed["summary"]["reason"])
+
     def test_bad_headers_are_refused(self):
         dana = self.make_client("dana@example.com")
         for bad in ({**HEADER, "name": ""}, {**HEADER, "links": ["javascript:alert(1)"]},

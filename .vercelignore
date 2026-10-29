@@ -1,0 +1,18 @@
+# Not needed on Vercel: postings live in Neon, the scoring index in R2, and tailoring
+# (LaTeX) runs locally. Keeps the upload and the Python function bundle small.
+target_jobs/
+target_jobs.zip
+outputs/
+tests/
+.cache/
+.studio/
+.venv/
+__pycache__/
+*.pdf
+*.db
+.env
+.env.*
+master.md
+master_profile.md
+template.tex
+CLAUDE.md

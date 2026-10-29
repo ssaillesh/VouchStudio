@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run vercel-build",
+  "functions": {
+    "api/engine.py": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "excludeFiles": "{.next/**,node_modules/**,public/**,src/**,static/**,tests/**,target_jobs/**,outputs/**,.cache/**,.studio/**,.venv/**,db/**,scripts/**,infra/**,target_jobs.zip,*.pdf,server.py,app.py,evaluate.py}"
+    }
+  },
+  "crons": [
+    { "path": "/api/cron/cleanup", "schedule": "17 4 * * *" }
+  ]
+}
