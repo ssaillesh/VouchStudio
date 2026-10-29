@@ -2,6 +2,11 @@
 /CLAUDE.md
 /master_profile.md
 /template.tex
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.studio/
 /.venv/
 /.studio/
 /tests/fixtures/regression/*.pdf
