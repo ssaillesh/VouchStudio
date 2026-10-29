@@ -1,15 +1,30 @@
-/.claude
-/CLAUDE.md
-/master_profile.md
-/template.tex
-.DS_Store
-__pycache__/
-*.pyc
-.venv/
-.studio/
-/.venv/
+# Secrets: API keys, tokens and DATABASE_URL live in .env (see .env.example)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Private data: accounts, admin list, career facts and resumes
 /.studio/
+*.db
+*.sqlite
+*.sqlite3
+/master_profile.md
+/master.md
+/template.tex
+/*resume*.pdf
+/outputs/
 /tests/fixtures/regression/*.pdf
 /tests/fixtures/regression/*.tex
 /tests/fixtures/bad_outputs/*.pdf
-/outputs/
+
+# Local tooling
+/.claude
+/CLAUDE.md
+/.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.DS_Store

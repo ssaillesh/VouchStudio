@@ -9,6 +9,9 @@ cd "$script_dir"
 if [ -x /usr/libexec/path_helper ]; then
   eval "$(/usr/libexec/path_helper)"  # puts /Library/TeX/texbin (pdflatex) on PATH
 fi
+if [ -f "$script_dir/.env" ]; then
+  set -a; . "$script_dir/.env"; set +a  # API keys and DATABASE_URL (gitignored; see .env.example)
+fi
 
 venv="$script_dir/.venv"
 if [ ! -x "$venv/bin/python" ]; then
