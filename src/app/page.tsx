@@ -14,7 +14,7 @@ export default function Home() {
         <section className="hero reveal">
           <p className="tagline">Better jobs. Smarter search.</p>
           <h1>Find the jobs your experience actually covers.</h1>
-          <p className="lede">Upload your resume or a tagged master profile. VouchStudio reads the requirements
+          <p className="lede">Upload your resume. VouchStudio reads the requirements
             of every posting on the board and scores each one against the evidence you have, so you see
             where you fit, and what is missing, before you apply.</p>
           <HeroActions />

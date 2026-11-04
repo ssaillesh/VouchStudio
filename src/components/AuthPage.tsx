@@ -16,7 +16,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
           <p className="eyebrow">{login ? 'Log in' : 'Create your account'}</p>
           <h1 id="auth-title">{login ? 'Welcome back.' : 'Start with your resume.'}</h1>
           <p className="lede">{login ? 'Log in to see the board scored against your profile.'
-            : 'Make an account, upload your resume or master profile, and every job on the board is scored for you.'}</p>
+            : 'Make an account, upload your resume, and every job on the board is scored for you.'}</p>
           <AuthForm mode={mode} />
           <p className="auth-switch">
             {login ? <>New to VouchStudio? <a href="/signup">Create an account</a></>

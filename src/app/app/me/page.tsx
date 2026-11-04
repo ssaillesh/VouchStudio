@@ -93,7 +93,7 @@ export default function MePage() {
       <Reveal as="header" className="page-head">
         <p className="eyebrow">VouchStudio · your profile</p>
         <h1>See every job through your own evidence.</h1>
-        <p className="lede">Upload your resume or a tagged master profile. It is kept with your account, used only
+        <p className="lede">Upload your resume, one page or two. It is kept with your account, used only
           to score the board for you, and never shown to anyone else.</p>
       </Reveal>
       <div className="resume-grid">
@@ -105,7 +105,7 @@ export default function MePage() {
             onDrop={(e) => { e.preventDefault(); setOver(false); submitFile(e.dataTransfer.files[0]); }}>
             <input type="file" accept=".md,.txt,.pdf" onChange={(e) => { submitFile(e.target.files?.[0]); e.target.value = ''; }} />
             <span className="drop-title">Drop a file here, or choose one</span>
-            <span className="drop-sub">Master profile (.md), plain resume (.md or .txt), or PDF. Up to 2 MB.</span>
+            <span className="drop-sub">Your resume as a PDF, .txt or .md. Up to 2 MB.</span>
           </label>
           <p className="or">or paste the text</p>
           <textarea rows={7} placeholder="Paste your resume text here" value={paste} onChange={(e) => setPaste(e.target.value)} />

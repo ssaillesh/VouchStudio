@@ -35,8 +35,9 @@ import dashboard
 import fetch_jobs
 import pipeline
 
-INDEX_VERSION = 5  # 2: either-or groups, pay text, company name; 3: group overlap;
+INDEX_VERSION = 6  # 2: either-or groups, pay text, company name; 3: group overlap;
                    # 4: link targets, "excel" verb, "good fit" headings; 5: "what we look for"
+                   # 6: legal boilerplate is info, a line-1 title is never a section
 INDEX_NAME = "job_index.json"
 MAX_UPLOAD_BYTES = 2_000_000
 PROFILE_EXTENSIONS = (".md", ".txt", ".pdf")
@@ -78,7 +79,16 @@ RESUME_SECTIONS = re.compile(
     r"^(summary|profile|about( me)?|objective|experience|work experience|professional "
     r"experience|employment( history)?|work history|projects?|personal projects|education|"
     r"skills|technical skills|core skills|certifications?|awards?|honou?rs|publications|"
-    r"leadership|volunteer(ing)?|activities|languages|interests|research)\s*:?$", re.I)
+    r"leadership|volunteer(ing)?|activities|languages|interests|hobbies|research)\s*:?$", re.I)
+# What a resume wants to learn or does for fun is not experience: these sections and labels
+# are kept as untagged lines, which are never evidence.
+NOT_CLAIMED = re.compile(r"^(?:interests|hobbies|interests (?:and|&) hobbies|hobbies (?:and|&) "
+                         r"interests|(?:currently )?learning|personal interests)\b", re.I)
+# Links name a host, not a skill ("github.com/jane" is no GitHub experience); emails likewise.
+LINK = re.compile(r"\S+@\S+\.\w+|https?://\S+|\bwww\.\S+"
+                  r"|\b[\w-]+(?:\.[\w-]+)*\.(?:com|ca|io|org|dev|me|net|ai|co|app)/\S*"
+                  r"|\b[\w-]+(?:\.[\w-]+)*\.(?:vercel\.app|github\.io|netlify\.app|herokuapp\.com"
+                  r"|pages\.dev)\b", re.I)
 
 
 class ProfileError(Exception):
@@ -267,6 +277,7 @@ def is_master(text: str) -> bool:
 def resume_to_master(text: str) -> str:
     """Rewrite a plain resume into the master layout, every content line a claim."""
     out = ["# Uploaded resume", "", "## Profile", ""]
+    unclaimed = False
     for raw in text.split("\n"):
         line = raw.strip()
         if not line:
@@ -282,12 +293,14 @@ def resume_to_master(text: str) -> str:
         elif letters and letters.isupper() and len(line.split()) <= 4 and len(letters) >= 4:
             heading = line.title()
         if heading:
+            unclaimed = bool(NOT_CLAIMED.match(heading))
             out += ["", f"## {pipeline.collapse_ws(heading)}", ""]
             continue
         body = re.sub(r"^([-*+•●▪‣⁃]|\d+[.)])\s*", "", line)
-        body = pipeline.TAG_PATTERN.sub("", body).strip()
+        body = pipeline.collapse_ws(LINK.sub(" ", pipeline.TAG_PATTERN.sub("", body)))
         if body:
-            out.append(f"- `[V]` {body}")
+            claimed = not unclaimed and not NOT_CLAIMED.match(body.strip("*_ "))
+            out.append(f"- `[V]` {body}" if claimed else f"- {body}")
     return "\n".join(out) + "\n"
 
 
@@ -312,8 +325,8 @@ def load_profile(filename: str, data: bytes, text: str | None = None) -> Profile
         raise ProfileError("No evidence lines were found in the profile")
     warnings = []
     if mode == "resume":
-        warnings.append("Scored as a plain resume: every line counts as your own claim. A "
-                        "tagged master profile ([V]/[NO]) gives stricter, more reliable scores.")
+        warnings.append("Scored as a resume: the skills, tools and degree it names count as your "
+                        "experience. Interests, hobbies and links do not.")
     return Profile(mode=mode, filename=Path(filename).name, master=master,
                    evidence_lines=evidence,
                    skills=[pipeline.SKILL_INDEX[k].display for k in positive
@@ -332,7 +345,6 @@ def _signature(req: dict[str, Any]) -> tuple:
 
 def score_jobs(profile: Profile, jobs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Fit score for every job with enough detail; matches are memoized per profile.
-
     Jobs with requirements but fewer than MIN_SKILL_REQUIREMENTS recognized skills are
     returned with ``insufficient: True`` and no score, rank or verdict.
     """

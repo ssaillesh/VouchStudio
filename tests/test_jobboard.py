@@ -181,6 +181,46 @@ class ProfileTests(BoardCase):
         self.assertIn("- `[V]` Python and Docker work", converted)
         self.assertEqual(converted.count("[NO]"), 0)
 
+    def test_resume_interests_and_links_are_not_claims(self):
+        text = ("Jane Doe\njane@example.com | github.com/janedoe | janedoe.vercel.app\n\n"
+                "EXPERIENCE\n- Built React and TypeScript dashboards used by 2,000 merchants\n"
+                "- Wrote Python services on Docker with PostgreSQL for the billing team\n\n"
+                "SKILLS\nPython, React, TypeScript, Docker, Git, GitHub Actions\n"
+                "Currently learning: Kubernetes\n\nINTERESTS\nRust, rock climbing, Kafka\n")
+        profile = J.load_profile("jane.txt", text.encode())
+        for claimed in ("Python", "React", "Docker", "GitHub Actions"):
+            self.assertIn(claimed, profile.skills)
+        for unclaimed in ("Rust", "Apache Kafka", "Kubernetes", "GitHub", "Vercel"):
+            self.assertNotIn(unclaimed, profile.skills)
+        converted = J.resume_to_master(text)
+        self.assertNotIn("example.com", converted)
+        self.assertIn("- Rust, rock climbing, Kafka", converted)  # kept, untagged
+
+    def test_resume_degree_is_judged_on_its_own_level_and_field(self):
+        def status(education, clause):
+            text = (f"Name\n\nEDUCATION\n{education}\n\nEXPERIENCE\n- Built Python tools for "
+                    "analysts and wrote SQL reports every week for the finance team\n")
+            master = J.load_profile("r.txt", text.encode()).master
+            req = P.Requirement("Degree requirement", "degree", "education", "required", [0],
+                                clause, "")
+            P.match_requirement(req, master)
+            return req.status
+        cs = "University of Toronto, Bachelor of Science in Computer Science, 2024"
+        self.assertEqual(status(cs, "Bachelor's degree in Computer Science"), P.STATUS_MATCHED)
+        self.assertEqual(status(cs, "Bachelor of Science in Physics"), P.STATUS_NOT_EVIDENCED)
+        self.assertEqual(status(cs, "Master's degree in Computer Science"), P.STATUS_NOT_EVIDENCED)
+        msc = "McGill University, M.Sc. in Computer Science, 2023"
+        self.assertEqual(status(msc, "Master's degree or PhD in Computer Science"), P.STATUS_MATCHED)
+        self.assertEqual(status(msc, "PhD in Computer Science"), P.STATUS_NOT_EVIDENCED)
+        basc = "University of Waterloo, Bachelor of Applied Science, Mechatronics Engineering"
+        self.assertEqual(status(basc, "Degree in any engineering discipline"), P.STATUS_MATCHED)
+        self.assertEqual(status(basc, "BS in Computer Science or related field"), P.STATUS_AMBIGUOUS)
+        bcom = "Queen's University, Bachelor of Commerce, 2022"
+        self.assertEqual(status(bcom, "Degree in Business, Finance or Economics"), P.STATUS_MATCHED)
+        self.assertEqual(status(bcom, "Bachelor's degree in a STEM field"), P.STATUS_NOT_EVIDENCED)
+        bare = "University of Ottawa, Bachelor of Science, 2021"
+        self.assertEqual(status(bare, "Bachelor's degree in Computer Science"), P.STATUS_AMBIGUOUS)
+
     def test_upload_errors(self):
         for name, data, fragment in (
                 ("cv.docx", b"PK\x03\x04", ".md, .txt or .pdf"),

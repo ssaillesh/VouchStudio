@@ -326,6 +326,33 @@ class ParsingAndScoringTests(WorkspaceCase):
         c = self.analysis("## Requirements\n- PhD in Machine Learning\n")
         self.assertEqual(self.req(c, "Degree requirement").status, P.STATUS_NOT_EVIDENCED)
 
+    def test_legal_boilerplate_and_culture_sections_are_not_requirements(self):
+        a = self.analysis("## Requirements\n- Experience with Python\n"
+                          "Acme is an Equal Opportunity Employer. We consider applicants without "
+                          "regard to race, including those with arrest and conviction records.\n"
+                          "Notice for New York City Applicants: Acme may use Automated "
+                          "Employment Decision Tools (AEDT) under NYC Local Law 144.\n"
+                          "**Base Pay Grade** - L4\n"
+                          "## The Acme Experience\n- Fostering Connection and Well-Being for "
+                          "every Acmenaut\n")
+        names = [r.name for r in a.requirements]
+        self.assertIn("Python", names)
+        for noise in ("Equal Opportunity Employer", "AEDT", "York City", "NYC Local Law",
+                      "Fostering Connection", "Well-Being", "Base Pay Grade"):
+            self.assertNotIn(noise, names)
+
+    def test_title_with_a_section_word_keeps_metadata_out(self):
+        jd = self.root / "target_jobs" / "title.md"
+        jd.write_text("# Product Intern, End User Experience - Acme\n\n**Company**: Acme\n"
+                      "**URL**: https://jobs.example.com/acme/1\n**Date Ingested**: 2026-10-27\n"
+                      "**Description Completeness**: Full\n\n## Requirements\n"
+                      "- Experience with Python and Docker\n", encoding="utf-8")
+        analysis = P.analyze(P.read_job_description(jd, self.root), self.master(False))
+        names = [r.name for r in analysis.requirements]
+        self.assertIn("Python", names)
+        for noise in ("Ingested", "Completeness", "URL", "Acme"):
+            self.assertNotIn(noise, names)
+
     def test_stack_description_is_one_either_or_requirement(self):
         a = self.analysis("## Requirements\n- Experience with programming. We work mostly in "
                           "Java, Ruby, Python and Go.\n")

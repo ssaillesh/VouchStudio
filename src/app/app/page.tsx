@@ -84,7 +84,7 @@ export default function JobsPage() {
           </>
         ) : (
           <>
-            <p><span className="src">No profile yet</span>Upload your resume or master profile to see how you fit each job.</p>
+            <p><span className="src">No profile yet</span>Upload your resume to see how you fit each job.</p>
             <a className="btn primary" href="/app/me">Upload your resume</a>
           </>
         )}
