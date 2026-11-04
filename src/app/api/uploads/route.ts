@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { requireUser } from '@/lib/auth';
 import { PROFILE_TYPES, extension, profileUploadKey } from '@/lib/board';
 import { HttpError, json, readJson, route, text } from '@/lib/http';
-import { presignPut } from '@/lib/r2';
+import { ensureRoom, presignPut } from '@/lib/r2';
 import { createMediaUpload } from '@/lib/reviews';
 
 const MAX_PROFILE_BYTES = 2_000_000;
@@ -20,6 +20,7 @@ export const POST = route(async (request: NextRequest) => {
   if (body.purpose === 'profile') {
     if (!Number.isInteger(size) || size <= 0) throw new HttpError(422, 'The file is empty.');
     if (size > MAX_PROFILE_BYTES) throw new HttpError(413, 'That file is larger than 2 MB.');
+    await ensureRoom(size);
     const key = profileUploadKey(user, filename);
     const contentType = PROFILE_TYPES[extension(filename)];
     return json({ key, url: await presignPut(key, contentType, size), headers: { 'Content-Type': contentType } });

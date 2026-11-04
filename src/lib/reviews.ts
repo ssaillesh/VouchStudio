@@ -36,6 +36,7 @@ export async function createMediaUpload(user: User, filename: string, contentTyp
   if (pending[0].n >= MAX_PENDING_MEDIA) {
     throw new HttpError(429, 'Too many unfinished uploads. Post or discard your review first.');
   }
+  await r2.ensureRoom(size);
   const id = randomUUID();
   const key = `users/${user.id}/reviews/media/${id}${type.ext}`;
   const name = (filename.split(/[\\/]/).pop() || `attachment${type.ext}`).slice(0, 160);

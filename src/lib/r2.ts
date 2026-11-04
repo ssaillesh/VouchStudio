@@ -3,10 +3,15 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command,
   PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { db } from './db';
 import { HttpError } from './http';
 
 const UPLOAD_SECONDS = 600;
 const READ_SECONDS = 300;
+// R2's free tier stores 10 GB. New uploads stop at this budget, which leaves room for
+// profiles, build PDFs and the job index, none of which ask before writing.
+const STORAGE_BUDGET_BYTES = Number(process.env.R2_BUDGET_BYTES) || 9_000_000_000;
+const SNAPSHOT_MINUTES = 15;
 
 let cached: { client: S3Client; bucket: string } | null = null;
 
@@ -78,6 +83,41 @@ export async function put(key: string, body: Uint8Array | string, contentType: s
 export async function remove(key: string): Promise<void> {
   const { client, bucket } = r2();
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/** Bytes stored in the whole bucket (one list call per 1,000 objects). */
+async function bucketBytes(): Promise<number> {
+  const { client, bucket } = r2();
+  let token: string | undefined;
+  let total = 0;
+  do {
+    const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }));
+    for (const object of page.Contents ?? []) total += object.Size ?? 0;
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return total;
+}
+
+/**
+ * Refuse an upload of `size` bytes that would take the bucket past STORAGE_BUDGET_BYTES.
+ * The bucket total is listed at most every SNAPSHOT_MINUTES (board key 'storage'); review
+ * media signed since then, and every pending upload, are added from Neon on top of it.
+ */
+export async function ensureRoom(size: number): Promise<void> {
+  const fresh = await db()`SELECT 1 FROM board WHERE key = 'storage'
+                           AND updated_at > now() - make_interval(mins => ${SNAPSHOT_MINUTES})`;
+  if (!fresh.length) {
+    const bytes = await bucketBytes();
+    await db()`INSERT INTO board (key, value) VALUES ('storage', ${JSON.stringify({ bytes })}::jsonb)
+               ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`;
+  }
+  const rows = await db()`
+    SELECT (b.value->>'bytes')::bigint + coalesce((SELECT sum(m.size_bytes) FROM review_media m
+             WHERE m.status = 'pending' OR m.created_at > b.updated_at), 0) AS used
+    FROM board b WHERE b.key = 'storage'`;
+  if (Number(rows[0].used) + size > STORAGE_BUDGET_BYTES) {
+    throw new HttpError(507, 'File storage is full for now, so uploads are paused. Try again later.');
+  }
 }
 
 /** Delete everything under a folder prefix (an account's users/<id>/). */

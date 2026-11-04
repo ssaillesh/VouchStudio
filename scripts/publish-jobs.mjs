@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { neon } from '@neondatabase/serverless';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,7 +96,16 @@ for (let i = 0; i < rows.length; i += CHUNK) {
 process.stdout.write('\n');
 const removed = await sql`DELETE FROM jobs WHERE NOT (id = ANY(${rows.map((r) => r.id)}::text[]))
                           RETURNING id`;
+const previous = (await sql`SELECT value->>'key' AS key FROM board WHERE key = 'index'`)[0]?.key;
 await sql`INSERT INTO board (key, value) VALUES ('index', ${JSON.stringify({
   ...constants, key, sha256, generated: index.generated, jobs: rows.length })}::jsonb)
   ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`;
 console.log(`Published ${rows.length} jobs (${removed.length} removed). Index: ${key}`);
+
+// 5. Old indexes only use up R2's free 10 GB. The previous one stays, since a score that
+//    started before this publish may still be reading it.
+const keep = new Set([key, previous]);
+const listing = await r2.send(new ListObjectsV2Command({ Bucket: need('R2_BUCKET'), Prefix: 'board/' }));
+const stale = (listing.Contents ?? []).map((o) => o.Key).filter((k) => k && !keep.has(k));
+for (const old of stale) await r2.send(new DeleteObjectCommand({ Bucket: need('R2_BUCKET'), Key: old }));
+if (stale.length) console.log(`Deleted ${stale.length} old index file(s) from R2.`);
