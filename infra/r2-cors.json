@@ -2,7 +2,7 @@
   "rules": [
     {
       "allowed": {
-        "origins": ["https://vouchstudio.vercel.app/", "http://localhost:3000"],
+        "origins": ["https://vouchstudio.vercel.app", "http://localhost:3000"],
         "methods": ["PUT", "GET", "HEAD"],
         "headers": ["content-type"]
       },
